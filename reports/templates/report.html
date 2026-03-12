@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lead Report — {{ run.care_home_name }}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; color: #2c3e50; background: #f8f9fa; }
+  .page { max-width: 1000px; margin: 0 auto; padding: 32px 24px; }
+
+  header { background: #1a3a5c; color: #fff; padding: 28px 32px; border-radius: 8px; margin-bottom: 32px; }
+  header h1 { font-size: 1.8rem; margin-bottom: 4px; }
+  header .care-home { font-size: 1.3rem; opacity: 0.9; margin-bottom: 10px; font-weight: 500; }
+  header .meta { font-size: 0.88rem; opacity: 0.80; display: flex; gap: 24px; flex-wrap: wrap; }
+  header .meta span::before { content: "▸ "; }
+
+  .private-care-note {
+    background: #fff8e1; border: 1px solid #f9a825; border-radius: 6px;
+    padding: 12px 18px; margin-bottom: 28px; font-size: 0.9rem; color: #5d4037;
+  }
+  .private-care-note strong { color: #e65100; }
+
+  .summary-bar { display: flex; gap: 14px; margin-bottom: 32px; flex-wrap: wrap; }
+  .stat-card { background: #fff; border-radius: 8px; padding: 14px 20px;
+               box-shadow: 0 1px 4px rgba(0,0,0,.08); flex: 1; min-width: 110px; text-align: center; }
+  .stat-card .number { font-size: 1.9rem; font-weight: 700; color: #1a3a5c; }
+  .stat-card .label { font-size: 0.76rem; color: #7f8c8d; text-transform: uppercase; letter-spacing: .05em; }
+
+  .section { margin-bottom: 40px; }
+  .section-header { background: #2c3e50; color: #fff; padding: 10px 18px;
+                    border-radius: 6px 6px 0 0; font-size: 1rem; font-weight: 600;
+                    display: flex; justify-content: space-between; align-items: center; }
+  .section-header .count { background: rgba(255,255,255,.2); border-radius: 12px;
+                           padding: 2px 10px; font-size: 0.8rem; }
+  .section-qual { background: #eaf0fb; border: 1px solid #c5d4f0; border-top: none;
+                  padding: 9px 18px; font-size: 0.83rem; color: #2c3e6a; font-style: italic; }
+
+  .lead-card { background: #fff; border: 1px solid #e0e6ed; border-top: none;
+               padding: 16px 18px; display: flex; gap: 18px; align-items: flex-start; }
+  .lead-card:last-child { border-radius: 0 0 6px 6px; }
+  .lead-card + .lead-card { border-top: 1px solid #e0e6ed; }
+
+  .score-badge { min-width: 50px; height: 50px; border-radius: 50%; display: flex;
+                 align-items: center; justify-content: center; font-weight: 700;
+                 font-size: 0.85rem; flex-shrink: 0; }
+  .score-high { background: #d4edda; color: #155724; }
+  .score-mid  { background: #fff3cd; color: #856404; }
+  .score-low  { background: #f8d7da; color: #721c24; }
+
+  .lead-body { flex: 1; }
+  .lead-name { font-size: 1rem; font-weight: 600; margin-bottom: 3px; }
+  .lead-address { font-size: 0.83rem; color: #6c757d; margin-bottom: 5px; }
+  .lead-meta { font-size: 0.8rem; color: #7f8c8d; }
+
+  .contacts { margin-top: 10px; }
+  .contacts h4 { font-size: 0.74rem; text-transform: uppercase; color: #7f8c8d;
+                 letter-spacing: .06em; margin-bottom: 5px; }
+  .contact-row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px;
+                 font-size: 0.85rem; }
+  .contact-name { font-weight: 700; color: #1a3a5c; }
+  .contact-role { color: #495057; }
+  .contact-note { font-size: 0.76rem; color: #adb5bd; }
+  .contact-hint { font-size: 0.78rem; color: #888; font-style: italic; margin-top: 3px; }
+  .find-online { font-size: 0.78rem; color: #7f8c8d; margin-top: 4px; }
+  .find-online a { color: #1a6ec7; text-decoration: none; margin-right: 8px; }
+  .find-online a:hover { text-decoration: underline; }
+
+  .status-tag { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 0.72rem;
+                font-weight: 600; text-transform: uppercase; margin-left: 6px; vertical-align: middle; }
+  .status-new           { background: #e7f3ff; color: #0c63e4; }
+  .status-contacted     { background: #fff3cd; color: #664d03; }
+  .status-converted     { background: #d1e7dd; color: #0a3622; }
+  .status-not_converted { background: #f8d7da; color: #58151c; }
+  .status-ignored       { background: #e2e3e5; color: #41464b; }
+
+  .notes-block { margin-top: 7px; background: #f8f9fa; border-left: 3px solid #adb5bd;
+                 padding: 5px 10px; font-size: 0.82rem; color: #495057; border-radius: 0 4px 4px 0; }
+
+  .score-breakdown { font-size: 0.74rem; color: #adb5bd; margin-top: 5px; }
+
+  footer { margin-top: 40px; border-top: 1px solid #dee2e6; padding-top: 14px;
+           font-size: 0.76rem; color: #adb5bd; text-align: center; }
+
+  @media print {
+    body { background: #fff; }
+    .page { padding: 0; }
+    .lead-card { page-break-inside: avoid; }
+    .section { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <h1>Lead Generation Report</h1>
+    <div class="care-home">{{ run.care_home_name }}</div>
+    <div class="meta">
+      <span>Catchment: {{ run.postcode }}, {{ run.radius_km }} km radius</span>
+      <span>Generated: {{ generated_at }}</span>
+      <span>Search run: {{ run.run_at[:10] }}</span>
+    </div>
+  </header>
+
+  <div class="private-care-note">
+    <strong>Private care context:</strong> Targets are organisations whose clients are likely to
+    self-fund residential care at <strong>~£2,000/week</strong>. Priority scores weight both
+    referral volume and the wealth indicator — organisations dealing with asset-rich elderly
+    (solicitors, private patient units, orthopaedic wards) score highest.
+  </div>
+
+  <div class="summary-bar">
+    <div class="stat-card">
+      <div class="number">{{ total_leads }}</div>
+      <div class="label">Total Leads</div>
+    </div>
+    <div class="stat-card">
+      <div class="number" style="color:#155724">{{ high_priority }}</div>
+      <div class="label">High Priority (≥70)</div>
+    </div>
+    <div class="stat-card">
+      <div class="number" style="color:#664d03">{{ mid_priority }}</div>
+      <div class="label">Medium (40–69)</div>
+    </div>
+    <div class="stat-card">
+      <div class="number" style="color:#0c63e4">{{ contacted }}</div>
+      <div class="label">Contacted</div>
+    </div>
+    <div class="stat-card">
+      <div class="number" style="color:#0a3622">{{ converted }}</div>
+      <div class="label">Converted</div>
+    </div>
+    {% if contacted > 0 %}
+    <div class="stat-card">
+      <div class="number">{{ "%.0f"|format(conversion_rate * 100) }}%</div>
+      <div class="label">Conversion Rate</div>
+    </div>
+    {% endif %}
+  </div>
+
+  {% for section in sections %}
+  <div class="section">
+    <div class="section-header">
+      <span>{{ section.label }}</span>
+      <span class="count">{{ section.leads | length }}</span>
+    </div>
+    {% if section.qualification_note %}
+    <div class="section-qual">{{ section.qualification_note }}</div>
+    {% endif %}
+
+    {% for lead in section.leads %}
+    {% set score_pct = (lead.priority_score * 100) | int %}
+    {% set score_class = "score-high" if lead.priority_score >= 0.7 else ("score-mid" if lead.priority_score >= 0.4 else "score-low") %}
+    <div class="lead-card">
+      <div class="score-badge {{ score_class }}">{{ score_pct }}</div>
+      <div class="lead-body">
+        <div class="lead-name">
+          {{ lead.name }}
+          <span class="status-tag status-{{ lead.status }}">{{ lead.status | replace("_", " ") }}</span>
+        </div>
+
+        <div class="lead-address">
+          {% set addr_parts = [] %}
+          {% if lead.address_line1 %}{% set _ = addr_parts.append(lead.address_line1) %}{% endif %}
+          {% if lead.address_line2 %}{% set _ = addr_parts.append(lead.address_line2) %}{% endif %}
+          {% if lead.town %}{% set _ = addr_parts.append(lead.town) %}{% endif %}
+          {% if lead.postcode %}{% set _ = addr_parts.append(lead.postcode) %}{% endif %}
+          {{ addr_parts | join(", ") or "Address not available" }}
+        </div>
+
+        <div class="lead-meta">
+          {% if lead.distance_km is not none %}{{ lead.distance_km }} km away{% endif %}
+          {% if lead.phone %} &bull; {{ lead.phone }}{% endif %}
+          {% if lead.email %} &bull; {{ lead.email }}{% endif %}
+          {% if lead.website %} &bull; <a href="{{ lead.website }}">website</a>{% endif %}
+        </div>
+
+        {% set li_q = (lead.name ~ " " ~ (lead.town or "")) | urlencode %}
+        {% set fb_q = (lead.name ~ " " ~ (lead.town or "")) | urlencode %}
+        <div class="find-online">
+          <a href="https://www.linkedin.com/search/results/companies/?keywords={{ li_q }}" target="_blank">LinkedIn</a>
+          <a href="https://www.facebook.com/search/top?q={{ fb_q }}" target="_blank">Facebook</a>
+        </div>
+
+        {% if lead.real_contacts or lead.placeholder_hint %}
+        <div class="contacts">
+          <h4>Key Contacts</h4>
+          {% for c in lead.real_contacts %}
+          <div class="contact-row">
+            {% if c.name %}
+            <span class="contact-name">{{ c.name }}</span>
+            <span class="contact-role">— {{ c.role }}</span>
+            {% else %}
+            <span class="contact-role">{{ c.role }}</span>
+            {% endif %}
+            {% if c.email %}<span class="contact-note">&bull; {{ c.email }}</span>{% endif %}
+            {% if c.phone %}<span class="contact-note">&bull; {{ c.phone }}</span>{% endif %}
+            {% if c.source_notes and c.source_notes != "Role placeholder" %}
+            <span class="contact-note">({{ c.source_notes }})</span>
+            {% endif %}
+          </div>
+          {% endfor %}
+          {% if lead.placeholder_hint %}
+          <div class="contact-hint">
+            {% if lead.real_contacts %}Also look for:{% else %}If no named contact found, look for:{% endif %}
+            {{ lead.placeholder_hint }}
+          </div>
+          {% endif %}
+        </div>
+        {% endif %}
+
+        {% if lead.notes %}
+        <div class="notes-block">{{ lead.notes }}</div>
+        {% endif %}
+
+        {% if lead.score_breakdown %}
+        <div class="score-breakdown">
+          type={{ lead.score_breakdown.get('type_score','?') }} &bull;
+          wealth={{ lead.score_breakdown.get('wealth_indicator','?') }} &bull;
+          distance={{ lead.score_breakdown.get('distance_score','?') }} &bull;
+          completeness={{ lead.score_breakdown.get('completeness','?') }}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+
+  <footer>
+    Data sources: NHS ODS ORD API &bull; OpenStreetMap (Overpass) &bull; Companies House Public Data API &bull; postcodes.io<br>
+    Priority score = 40% org type + 25% wealth indicator (self-funding likelihood) + 25% proximity + 10% data completeness<br>
+    Generated by Care Home Lead Generator &bull; {{ generated_at }}
+  </footer>
+
+</div>
+</body>
+</html>

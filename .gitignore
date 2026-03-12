@@ -1,0 +1,12 @@
+venv/
+leads.db
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+reports/output/
+.claude/
+Companies House API.txt
+*.db-shm
+*.db-wal
