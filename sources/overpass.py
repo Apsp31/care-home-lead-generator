@@ -132,6 +132,10 @@ CONTACTS_BY_TYPE = {
 class OverpassSource(DataSource):
     name = "overpass"
 
+    # Set to a subset of hospital_* org_type strings to restrict department expansion.
+    # None means all 7 departments.
+    dept_types: set[str] | None = None
+
     def fetch(self, lat: float, lon: float, radius_km: float) -> list[dict]:
         radius_m = int(radius_km * 1000)
         results = []
@@ -215,6 +219,8 @@ class OverpassSource(DataSource):
 
             for dept_label, org_type, contacts in HOSPITAL_DEPARTMENTS:
                 if org_type == "hospital_private" and skip_private:
+                    continue
+                if self.dept_types is not None and org_type not in self.dept_types:
                     continue
                 dept_id = f"{el['type']}/{el['id']}::{org_type}"
                 results.append({

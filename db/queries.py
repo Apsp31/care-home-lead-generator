@@ -8,12 +8,19 @@ from .schema import get_connection, DB_LOCK
 # --- Search Runs ---
 
 def create_search_run(care_home_name: str, postcode: str, radius_km: float,
-                      lat: float, lon: float, sources: list[str] | None = None) -> int:
+                      lat: float, lon: float, sources: list[str] | None = None,
+                      org_types: list[str] | None = None,
+                      hospital_depts: list[str] | None = None) -> int:
     with DB_LOCK:
         conn = get_connection()
         cur = conn.execute(
-            "INSERT INTO search_runs (care_home_name, postcode, radius_km, lat, lon, sources) VALUES (?,?,?,?,?,?)",
-            (care_home_name, postcode, radius_km, lat, lon, json.dumps(sources or []))
+            "INSERT INTO search_runs "
+            "(care_home_name, postcode, radius_km, lat, lon, sources, org_types, hospital_depts) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (care_home_name, postcode, radius_km, lat, lon,
+             json.dumps(sources or []),
+             json.dumps(org_types) if org_types is not None else None,
+             json.dumps(hospital_depts) if hospital_depts is not None else None)
         )
         conn.commit()
         run_id = cur.lastrowid
@@ -25,7 +32,7 @@ def get_distinct_care_homes() -> list[dict]:
     """One row per unique care_home_name with the most recent run's settings."""
     conn = get_connection()
     rows = conn.execute("""
-        SELECT care_home_name, postcode, radius_km, sources
+        SELECT care_home_name, postcode, radius_km, sources, org_types, hospital_depts
         FROM search_runs
         WHERE id IN (
             SELECT MAX(id) FROM search_runs GROUP BY care_home_name

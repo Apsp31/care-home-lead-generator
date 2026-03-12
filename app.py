@@ -17,6 +17,7 @@ from sources.nhs_ods import NHSODSSource
 from sources.overpass import OverpassSource
 from sources.companies_house import CompaniesHouseSource
 from sources.web_search import WebSearchSource
+from sources.enrichment import enrich_contacts, ENRICH_ROLES
 from scoring.engine import score_org, get_feedback_weights, recalculate_scores_for_run
 from scoring.rules import QUALIFICATION_NOTES
 from reports.html_report import generate_report, ORG_TYPE_LABELS
@@ -62,12 +63,15 @@ def status_badge(status: str) -> str:
     return f":{colour}[{status.replace('_', ' ').upper()}]"
 
 
-def run_sources(lat, lon, radius_km, selected_sources):
+def run_sources(lat, lon, radius_km, selected_sources, hospital_dept_types=None):
     sources = []
     if "NHS (GPs, hospitals, PCNs)" in selected_sources:
         sources.append(NHSODSSource())
     if "OpenStreetMap (hospices, pharmacies, community)" in selected_sources:
-        sources.append(OverpassSource())
+        ovp = OverpassSource()
+        if hospital_dept_types is not None:
+            ovp.dept_types = set(hospital_dept_types)
+        sources.append(ovp)
     if "Companies House (solicitors, estate agents)" in selected_sources:
         sources.append(CompaniesHouseSource())
     if "Web / Social (dementia cafes, LinkedIn, Facebook)" in selected_sources:
@@ -114,6 +118,43 @@ DEFAULT_SOURCES = [
     "Web / Social (dementia cafes, LinkedIn, Facebook)",
 ]
 
+# Org categories for the picker — label → list of org_type strings
+ORG_CATEGORY_OPTIONS: dict[str, list[str]] = {
+    "Hospital departments": [
+        "hospital_private", "hospital_discharge", "hospital_frailty",
+        "hospital_dementia", "hospital_ortho", "hospital_stroke", "hospital_social_work",
+    ],
+    "GP surgeries":           ["GP"],
+    "PCNs":                   ["PCN"],
+    "Hospices":               ["hospice"],
+    "Pharmacies":             ["pharmacy"],
+    "Solicitors":             ["solicitor"],
+    "Wealth managers":        ["wealth_manager"],
+    "IFAs":                   ["financial_adviser"],
+    "Estate agents":          ["estate_agent"],
+    "Social services":        ["social_services"],
+    "Dementia / memory cafes":["dementia_cafe"],
+    "Age UK branches":        ["age_uk_branch"],
+    "Carers groups":          ["carers_group"],
+    "Day centres":            ["day_centre"],
+    "Community groups":       ["community_group"],
+    "Places of worship":      ["place_of_worship"],
+    "Care homes (peer)":      ["nursing_home"],
+}
+ALL_ORG_CATEGORIES = list(ORG_CATEGORY_OPTIONS.keys())
+
+# Hospital department sub-picker — label → org_type string
+HOSPITAL_DEPT_OPTIONS: dict[str, str] = {
+    "Private Patient Unit":         "hospital_private",
+    "Discharge / Transfer of Care": "hospital_discharge",
+    "Frailty & Elderly Care":       "hospital_frailty",
+    "Memory Clinic / Dementia":     "hospital_dementia",
+    "Trauma & Orthopaedics":        "hospital_ortho",
+    "Stroke Rehabilitation":        "hospital_stroke",
+    "Social Work Department":       "hospital_social_work",
+}
+ALL_HOSPITAL_DEPTS = list(HOSPITAL_DEPT_OPTIONS.keys())
+
 if page == "New Search":
     st.header("New Lead Search")
 
@@ -130,6 +171,8 @@ if page == "New Search":
             prefill = prev_runs[idx]
 
     prefill_sources = json.loads(prefill.get("sources") or "[]") or DEFAULT_SOURCES
+    prefill_org_cats = json.loads(prefill.get("org_types") or "null") or ALL_ORG_CATEGORIES
+    prefill_hosp_depts = json.loads(prefill.get("hospital_depts") or "null") or ALL_HOSPITAL_DEPTS
 
     with st.form("search_form"):
         col1, col2, col3 = st.columns([2, 1, 1])
@@ -152,6 +195,29 @@ if page == "New Search":
             default=prefill_sources,
         )
 
+        with st.expander("Organisation filters & enrichment"):
+            st.markdown("**Organisation categories to include**")
+            selected_org_cats = st.multiselect(
+                "Categories",
+                options=ALL_ORG_CATEGORIES,
+                default=prefill_org_cats,
+                label_visibility="collapsed",
+            )
+
+            st.markdown("**Hospital departments to generate** *(applies when OpenStreetMap source is selected)*")
+            selected_hosp_dept_labels = st.multiselect(
+                "Hospital departments",
+                options=ALL_HOSPITAL_DEPTS,
+                default=prefill_hosp_depts,
+                label_visibility="collapsed",
+            )
+
+            st.markdown("**Contact enrichment**")
+            enrich_enabled = st.checkbox(
+                "Search LinkedIn for named contacts on orgs without them  *(adds ~2–3 min)*",
+                value=False,
+            )
+
         submitted = st.form_submit_button("Run Search", type="primary", use_container_width=True)
 
     if submitted:
@@ -169,12 +235,46 @@ if page == "New Search":
 
             st.success(f"Location: {lat:.4f}, {lon:.4f}")
 
+            # Resolve selected org types from category labels
+            selected_org_types: list[str] = []
+            for cat in selected_org_cats:
+                selected_org_types.extend(ORG_CATEGORY_OPTIONS.get(cat, []))
+            selected_org_types_set = set(selected_org_types)
+
+            # Resolve selected hospital department org_type strings
+            selected_hosp_dept_types = [
+                HOSPITAL_DEPT_OPTIONS[lbl]
+                for lbl in selected_hosp_dept_labels
+                if lbl in HOSPITAL_DEPT_OPTIONS
+            ]
+
             feedback_weights = get_feedback_weights()
-            run_id = queries.create_search_run(care_home, postcode, radius, lat, lon, selected_sources)
+            run_id = queries.create_search_run(
+                care_home, postcode, radius, lat, lon,
+                selected_sources,
+                org_types=selected_org_cats if selected_org_cats != ALL_ORG_CATEGORIES else None,
+                hospital_depts=selected_hosp_dept_labels
+                    if selected_hosp_dept_labels != ALL_HOSPITAL_DEPTS else None,
+            )
 
             progress = st.progress(0, text="Querying data sources...")
             with st.spinner("Fetching leads from data sources (this may take 30–60 seconds)..."):
-                orgs, errors = run_sources(lat, lon, radius, selected_sources)
+                orgs, errors = run_sources(
+                    lat, lon, radius, selected_sources,
+                    hospital_dept_types=selected_hosp_dept_types
+                        if selected_hosp_dept_labels != ALL_HOSPITAL_DEPTS else None,
+                )
+
+            # Filter by selected org categories (if not all selected)
+            if selected_org_types_set and selected_org_types_set != set(
+                t for types in ORG_CATEGORY_OPTIONS.values() for t in types
+            ):
+                orgs = [o for o in orgs if o.get("org_type") in selected_org_types_set]
+
+            if enrich_enabled and orgs:
+                enrich_types = set(selected_org_types_set) & set(ENRICH_ROLES)
+                progress.progress(50, text=f"Enriching contacts via LinkedIn ({len(enrich_types)} org types)...")
+                orgs = enrich_contacts(orgs, enrich_types if enrich_types else None)
 
             progress.progress(70, text="Scoring and saving leads...")
             save_orgs_to_db(orgs, run_id, radius, feedback_weights)

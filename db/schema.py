@@ -87,6 +87,8 @@ def init_db():
         # Migrations
         for ddl in [
             "ALTER TABLE search_runs ADD COLUMN sources TEXT",
+            "ALTER TABLE search_runs ADD COLUMN org_types TEXT",
+            "ALTER TABLE search_runs ADD COLUMN hospital_depts TEXT",
             "ALTER TABLE organisations ADD COLUMN email TEXT",
         ]:
             try:
