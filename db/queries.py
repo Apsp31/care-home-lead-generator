@@ -155,14 +155,35 @@ def get_contacts_for_orgs(org_ids: list[int]) -> dict[int, list[dict]]:
 def upsert_lead(org_id: int, run_id: int, score: float, breakdown: dict) -> int:
     with DB_LOCK:
         conn = get_connection()
+        # Carry forward status/notes from the most recent lead for this org
+        # so that re-running a search never loses CRM tagging.
         conn.execute("""
-            INSERT INTO leads (org_id, search_run_id, priority_score, score_breakdown)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO leads (org_id, search_run_id, priority_score, score_breakdown,
+                               status, notes, contacted_at)
+            VALUES (
+                ?, ?, ?, ?,
+                COALESCE(
+                    (SELECT status FROM leads
+                     WHERE org_id=? AND status != 'new'
+                     ORDER BY updated_at DESC LIMIT 1),
+                    'new'
+                ),
+                COALESCE(
+                    (SELECT notes FROM leads
+                     WHERE org_id=? AND notes != ''
+                     ORDER BY updated_at DESC LIMIT 1),
+                    ''
+                ),
+                (SELECT contacted_at FROM leads
+                 WHERE org_id=? AND contacted_at IS NOT NULL
+                 ORDER BY updated_at DESC LIMIT 1)
+            )
             ON CONFLICT(org_id, search_run_id) DO UPDATE SET
                 priority_score=excluded.priority_score,
                 score_breakdown=excluded.score_breakdown,
                 updated_at=datetime('now')
-        """, (org_id, run_id, score, json.dumps(breakdown)))
+        """, (org_id, run_id, score, json.dumps(breakdown),
+              org_id, org_id, org_id))
         row = conn.execute(
             "SELECT id FROM leads WHERE org_id=? AND search_run_id=?",
             (org_id, run_id)
