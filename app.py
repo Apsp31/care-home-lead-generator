@@ -114,10 +114,8 @@ with st.sidebar:
     _ver = (Path(__file__).parent / "VERSION").read_text().strip()
     st.caption(f"Care home referral outreach · v{_ver}")
     st.divider()
-    st.caption(
-        f"**{_current_user['username']}**"
-        + (" · admin" if _current_user["is_admin"] else "")
-    )
+    _admin_badge = " · admin" if _current_user["is_admin"] else ""
+    st.markdown(f"Logged in as **{_current_user['username']}**{_admin_badge}")
     if st.button("Log out", use_container_width=True):
         _auth.logout_user(st.session_state.auth_token)
         st.session_state.user = None
