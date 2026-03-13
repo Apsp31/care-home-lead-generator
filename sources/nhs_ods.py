@@ -1,7 +1,7 @@
 """NHS ODS ORD API — GP practices, NHS trusts, PCNs."""
 import requests
 from .base import DataSource
-from .geocoder import haversine_km
+from .geocoder import haversine_km, postcode_to_latlon
 
 # ODS role codes
 ROLE_CODES = {
@@ -52,8 +52,17 @@ class NHSODSSource(DataSource):
             org_lat = geo.get("lat")
             org_lon = geo.get("lng")
 
+            # Fall back to postcode geocoding when ODS has no coordinates
             if org_lat is None or org_lon is None:
-                continue
+                addr_parts_tmp = detail.get("Addresses", [{}])[0] if detail.get("Addresses") else {}
+                pc = addr_parts_tmp.get("PostCode", "")
+                if pc:
+                    try:
+                        org_lat, org_lon = postcode_to_latlon(pc)
+                    except Exception:
+                        pass
+                if org_lat is None or org_lon is None:
+                    continue
 
             dist = haversine_km(lat, lon, org_lat, org_lon)
             if dist > radius_km:
