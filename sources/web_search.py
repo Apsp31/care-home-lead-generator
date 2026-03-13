@@ -409,8 +409,16 @@ class WebSearchSource(DataSource):
                 continue
             if not _is_org_page(title, href, org_type):
                 continue
-            orgs.append(_make_org(title, org_type, lat, lon, 0.0,
-                                  "", town, href, f"fb::{_url_id(href)}"))
+            postcode = _extract_postcode(hit.get("body", ""))
+            org_lat, org_lon, org_pc, dist = lat, lon, "", 0.0
+            if postcode:
+                coords = _geocode_postcode(postcode)
+                if coords:
+                    org_lat, org_lon = coords
+                    org_pc = postcode
+                    dist = round(haversine_km(lat, lon, org_lat, org_lon), 2)
+            orgs.append(_make_org(title, org_type, org_lat, org_lon, dist,
+                                  org_pc, town, href, f"fb::{_url_id(href)}"))
         return orgs
 
     def _linkedin_profiles(self, query: str, org_type: str,
@@ -459,6 +467,14 @@ class WebSearchSource(DataSource):
                 continue
             if not _is_org_page(title, href, org_type):
                 continue
-            orgs.append(_make_org(title, org_type, lat, lon, 0.0,
-                                  "", town, href, f"li::{_url_id(href)}"))
+            postcode = _extract_postcode(hit.get("body", ""))
+            org_lat, org_lon, org_pc, dist = lat, lon, "", 0.0
+            if postcode:
+                coords = _geocode_postcode(postcode)
+                if coords:
+                    org_lat, org_lon = coords
+                    org_pc = postcode
+                    dist = round(haversine_km(lat, lon, org_lat, org_lon), 2)
+            orgs.append(_make_org(title, org_type, org_lat, org_lon, dist,
+                                  org_pc, town, href, f"li::{_url_id(href)}"))
         return orgs

@@ -26,7 +26,9 @@ except ImportError:
 from .web_search import (
     _ddg, _parse_linkedin_profile, _url_id, _reverse_geocode_town,
     _clean_title, _NEWS_DOMAINS, _DELAY,
+    _extract_postcode, _geocode_postcode,
 )
+from .geocoder import haversine_km
 
 # Credential suffixes to strip from adviser names
 _CREDENTIAL_RE = re.compile(
@@ -202,11 +204,23 @@ class SollaSource(DataSource):
                 role = "Later Life / Care Fees Specialist"
                 note = "Specialises in care fees and later life financial planning"
 
-            orgs.append(_make_org(
-                title, lat, lon, town, href,
+            # Try to geocode from postcode in the search snippet
+            postcode = _extract_postcode(hit.get("body", ""))
+            org_lat, org_lon = lat, lon
+            if postcode:
+                coords = _geocode_postcode(postcode)
+                if coords:
+                    org_lat, org_lon = coords
+
+            org = _make_org(
+                title, org_lat, org_lon, town, href,
                 f"solla::{_url_id(href)}",
                 [{"name": "", "role": role, "source_notes": note}],
-            ))
+            )
+            org["postcode"] = postcode or ""
+            if org_lat != lat or org_lon != lon:
+                org["distance_km"] = round(haversine_km(lat, lon, org_lat, org_lon), 2)
+            orgs.append(org)
         return orgs
 
     def _linkedin_profiles(self, query: str, lat: float, lon: float,
