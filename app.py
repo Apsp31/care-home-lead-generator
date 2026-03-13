@@ -38,7 +38,8 @@ st.set_page_config(
 
 with st.sidebar:
     st.title("Lead Generator")
-    st.caption("Care home referral outreach · v1.2")
+    _ver = (Path(__file__).parent / "VERSION").read_text().strip()
+    st.caption(f"Care home referral outreach · v{_ver}")
     st.divider()
     page = st.radio(
         "Navigate",
