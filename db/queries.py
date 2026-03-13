@@ -10,17 +10,19 @@ from .schema import get_connection, DB_LOCK
 def create_search_run(care_home_name: str, postcode: str, radius_km: float,
                       lat: float, lon: float, sources: list[str] | None = None,
                       org_types: list[str] | None = None,
-                      hospital_depts: list[str] | None = None) -> int:
+                      hospital_depts: list[str] | None = None,
+                      user_id: int | None = None) -> int:
     with DB_LOCK:
         conn = get_connection()
         cur = conn.execute(
             "INSERT INTO search_runs "
-            "(care_home_name, postcode, radius_km, lat, lon, sources, org_types, hospital_depts) "
-            "VALUES (?,?,?,?,?,?,?,?)",
+            "(care_home_name, postcode, radius_km, lat, lon, sources, org_types, hospital_depts, user_id) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
             (care_home_name, postcode, radius_km, lat, lon,
              json.dumps(sources or []),
              json.dumps(org_types) if org_types is not None else None,
-             json.dumps(hospital_depts) if hospital_depts is not None else None)
+             json.dumps(hospital_depts) if hospital_depts is not None else None,
+             user_id)
         )
         conn.commit()
         run_id = cur.lastrowid
@@ -28,26 +30,55 @@ def create_search_run(care_home_name: str, postcode: str, radius_km: float,
     return run_id
 
 
-def get_distinct_care_homes() -> list[dict]:
-    """One row per unique care_home_name with the most recent run's settings."""
+def get_distinct_care_homes(user_id: int | None = None) -> list[dict]:
+    """One row per unique care_home_name with the most recent run's settings.
+    If user_id given, only that user's runs; otherwise all runs."""
     conn = get_connection()
-    rows = conn.execute("""
-        SELECT care_home_name, postcode, radius_km, sources, org_types, hospital_depts
-        FROM search_runs
-        WHERE id IN (
-            SELECT MAX(id) FROM search_runs GROUP BY care_home_name
-        )
-        ORDER BY run_at DESC
-    """).fetchall()
+    if user_id is None:
+        rows = conn.execute("""
+            SELECT care_home_name, postcode, radius_km, sources, org_types, hospital_depts
+            FROM search_runs
+            WHERE id IN (SELECT MAX(id) FROM search_runs GROUP BY care_home_name)
+            ORDER BY run_at DESC
+        """).fetchall()
+    else:
+        rows = conn.execute("""
+            SELECT care_home_name, postcode, radius_km, sources, org_types, hospital_depts
+            FROM search_runs
+            WHERE user_id = ?
+              AND id IN (SELECT MAX(id) FROM search_runs WHERE user_id = ? GROUP BY care_home_name)
+            ORDER BY run_at DESC
+        """, (user_id, user_id)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
 
-def get_all_search_runs() -> list[dict]:
+def get_all_search_runs(user_id: int | None = None) -> list[dict]:
+    """All runs, or just those belonging to user_id if given."""
     conn = get_connection()
-    rows = conn.execute(
-        "SELECT * FROM search_runs ORDER BY run_at DESC"
-    ).fetchall()
+    if user_id is None:
+        rows = conn.execute("SELECT * FROM search_runs ORDER BY run_at DESC").fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM search_runs WHERE user_id=? ORDER BY run_at DESC", (user_id,)
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_all_search_runs_with_users() -> list[dict]:
+    """Admin view: all runs joined with username and lead count."""
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT sr.id, sr.care_home_name, sr.postcode, sr.radius_km, sr.run_at,
+               u.username,
+               COUNT(l.id) AS lead_count
+        FROM search_runs sr
+        LEFT JOIN users u ON u.id = sr.user_id
+        LEFT JOIN leads l ON l.search_run_id = sr.id
+        GROUP BY sr.id
+        ORDER BY sr.run_at DESC
+    """).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 

@@ -14,6 +14,7 @@ load_dotenv()
 
 from db.schema import init_db
 from db import queries
+from auth import auth as _auth
 from sources.geocoder import postcode_to_latlon
 from sources.nhs_ods import NHSODSSource
 from sources.overpass import OverpassSource
@@ -34,6 +35,78 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ── Auth state ─────────────────────────────────────────────────────────────────
+
+if "user" not in st.session_state:
+    st.session_state.user = None
+if "auth_token" not in st.session_state:
+    st.session_state.auth_token = None
+
+# Restore session from URL token on every load
+if st.session_state.user is None:
+    _t = st.query_params.get("t", "")
+    if _t:
+        _u = _auth.get_user_from_token(_t)
+        if _u:
+            st.session_state.user = _u
+            st.session_state.auth_token = _t
+
+
+def _show_landing():
+    col_c, col_m, col_r = st.columns([1, 2, 1])
+    with col_m:
+        st.title("Care Home Lead Generator")
+        st.markdown(
+            "Referral outreach intelligence for care home admissions teams.  \n"
+            "Find, score and track the professionals most likely to send you residents."
+        )
+        st.divider()
+        tab_login, tab_register = st.tabs(["Log in", "Register"])
+
+        with tab_login:
+            with st.form("login_form"):
+                username = st.text_input("Username")
+                password = st.text_input("Password", type="password")
+                submitted = st.form_submit_button("Log in", type="primary",
+                                                   use_container_width=True)
+            if submitted:
+                token, err = _auth.login_user(username, password)
+                if err:
+                    st.error(err)
+                else:
+                    user = _auth.get_user_from_token(token)
+                    st.session_state.user = user
+                    st.session_state.auth_token = token
+                    st.query_params["t"] = token
+                    st.rerun()
+
+        with tab_register:
+            st.caption("Anyone can register. No approval required.")
+            with st.form("register_form"):
+                new_username = st.text_input("Choose a username")
+                new_password = st.text_input("Choose a password", type="password")
+                submitted_reg = st.form_submit_button("Register", type="primary",
+                                                       use_container_width=True)
+            if submitted_reg:
+                ok, err = _auth.register_user(new_username, new_password)
+                if not ok:
+                    st.error(err)
+                else:
+                    token, _ = _auth.login_user(new_username, new_password)
+                    user = _auth.get_user_from_token(token)
+                    st.session_state.user = user
+                    st.session_state.auth_token = token
+                    st.query_params["t"] = token
+                    st.rerun()
+
+
+# Gate: show landing if not logged in
+if st.session_state.user is None:
+    _show_landing()
+    st.stop()
+
+_current_user = st.session_state.user
+
 # ── Sidebar navigation ────────────────────────────────────────────────────────
 
 with st.sidebar:
@@ -41,9 +114,26 @@ with st.sidebar:
     _ver = (Path(__file__).parent / "VERSION").read_text().strip()
     st.caption(f"Care home referral outreach · v{_ver}")
     st.divider()
+    st.caption(
+        f"**{_current_user['username']}**"
+        + (" · admin" if _current_user["is_admin"] else "")
+    )
+    if st.button("Log out", use_container_width=True):
+        _auth.logout_user(st.session_state.auth_token)
+        st.session_state.user = None
+        st.session_state.auth_token = None
+        st.query_params.clear()
+        st.rerun()
+    st.divider()
+    _nav_options = [
+        "New Search", "Lead Dashboard", "Map View",
+        "Feedback / CRM", "Scoring Weights", "Instructions",
+    ]
+    if _current_user["is_admin"]:
+        _nav_options.append("Admin")
     page = st.radio(
         "Navigate",
-        ["New Search", "Lead Dashboard", "Map View", "Feedback / CRM", "Scoring Weights"],
+        _nav_options,
         label_visibility="collapsed",
     )
     st.divider()
@@ -359,8 +449,9 @@ ALL_HOSPITAL_DEPTS = list(HOSPITAL_DEPT_OPTIONS.keys())
 if page == "New Search":
     st.header("New Lead Search")
 
-    # Previous search selector — pre-fills the form below
-    prev_runs = queries.get_distinct_care_homes()
+    # Previous search selector — pre-fills the form below (scoped to this user)
+    _uid_for_prev = None if _current_user["is_admin"] else _current_user["id"]
+    prev_runs = queries.get_distinct_care_homes(user_id=_uid_for_prev)
     prefill: dict = {}
     if prev_runs:
         options = ["— New search —"] + [
@@ -456,6 +547,7 @@ if page == "New Search":
                 org_types=selected_org_cats if selected_org_cats != ALL_ORG_CATEGORIES else None,
                 hospital_depts=selected_hosp_dept_labels
                     if selected_hosp_dept_labels != ALL_HOSPITAL_DEPTS else None,
+                user_id=_current_user["id"],
             )
 
             progress = st.progress(0, text="Querying data sources...")
@@ -495,7 +587,8 @@ if page == "New Search":
 elif page == "Lead Dashboard":
     st.header("Lead Dashboard")
 
-    runs = queries.get_all_search_runs()
+    _uid = None if _current_user["is_admin"] else _current_user["id"]
+    runs = queries.get_all_search_runs(user_id=_uid)
     if not runs:
         st.info("No searches yet. Run a search first.")
         st.stop()
@@ -658,7 +751,8 @@ elif page == "Map View":
 
     st.header("Map View")
 
-    runs = queries.get_all_search_runs()
+    _uid = None if _current_user["is_admin"] else _current_user["id"]
+    runs = queries.get_all_search_runs(user_id=_uid)
     if not runs:
         st.info("No searches yet. Run a search first.")
         st.stop()
@@ -999,7 +1093,8 @@ elif page == "Feedback / CRM":
     st.header("Feedback & CRM")
     st.caption("Update lead status and notes. Feedback is used to re-weight prioritisation.")
 
-    runs = queries.get_all_search_runs()
+    _uid = None if _current_user["is_admin"] else _current_user["id"]
+    runs = queries.get_all_search_runs(user_id=_uid)
     if not runs:
         st.info("No searches yet.")
         st.stop()
@@ -1159,3 +1254,145 @@ elif page == "Scoring Weights":
     - As you log outcomes, types with high conversion rates rise; poor-performing types fall
     - Click **Re-score** on the Lead Dashboard to apply updated weights to open leads
     """)
+
+
+# ── Page: Instructions ────────────────────────────────────────────────────────
+
+elif page == "Instructions":
+    st.header("How to Use This Tool")
+    st.markdown(
+        "This tool finds and prioritises organisations near your care home that are "
+        "likely to refer residents to you — GPs, hospitals, solicitors, IFAs, "
+        "community groups and more."
+    )
+
+    st.subheader("1. Run a Search")
+    st.markdown("""
+    Go to **New Search** and enter:
+    - **Care Home Name** — used to label results and group your CRM history
+    - **Postcode** — the postcode of your care home
+    - **Radius (km)** — how far out to search (5 km is a good starting point)
+
+    Choose your **data sources**. NHS + OpenStreetMap + Web/Social covers most organisations.
+    Companies House adds solicitors, IFAs, and estate agents. SOLLA adds specialist care fees advisers.
+
+    Under **Organisation filters & enrichment** you can narrow categories (e.g. hospitals only)
+    or enable LinkedIn enrichment to find named contacts (adds 2–3 minutes).
+
+    Click **Run Search** — results are saved automatically.
+    """)
+
+    st.subheader("2. Review Results")
+    st.markdown("""
+    **Lead Dashboard** shows all organisations found, sorted by priority score.
+    - Switch between *By org type* (grouped) and *By score* (flat ranked list)
+    - Filter by org type, status, or minimum score
+    - Each card shows address, phone, website, named contacts, and score breakdown
+    - Click **Generate HTML Report** to export a shareable report
+
+    **Map View** plots all leads on an interactive map.
+    - Click any marker for a popup, then click again for the full lead card below the map
+    - Filter by category, status, or score — the map updates live
+    """)
+
+    st.subheader("3. Work Your Leads")
+    st.markdown("""
+    **Feedback / CRM** is your outreach tracker.
+    - Set status: *Contacted*, *Converted*, *Not Converted*, or *Ignored*
+    - Add notes (e.g. who you spoke to, outcome, follow-up date)
+    - Status and notes carry forward automatically when you re-run a search for the same care home
+
+    Use **Re-score** on the Lead Dashboard after logging outcomes to re-rank leads based on
+    your real-world conversion rates.
+    """)
+
+    st.subheader("4. Priority Scores")
+    st.markdown("""
+    Every lead gets a score from 0–100 based on four factors:
+
+    | Factor | Weight | What it means |
+    |---|---|---|
+    | Org type | 40% | How likely this type of org refers residents |
+    | Wealth indicator | 25% | How likely their clients can fund private care |
+    | Distance | 25% | Closer orgs score higher |
+    | Data completeness | 10% | Bonus for having phone/website/contacts |
+
+    Scores update as you log feedback — types with high conversion rates rise automatically.
+    """)
+
+    st.subheader("5. Data Sources")
+    st.markdown("""
+    | Source | What it finds | Notes |
+    |---|---|---|
+    | NHS (GPs, hospitals, PCNs) | GP surgeries, NHS Trusts, Primary Care Networks | Free, no key needed |
+    | OpenStreetMap | Hospitals (7 dept types), hospices, pharmacies, community orgs | Free |
+    | Companies House | Solicitors, IFAs, wealth managers, estate agents | Needs API key in .env |
+    | Web / Social | Dementia cafes, Age UK, carers groups, day centres + named contacts | Uses DuckDuckGo |
+    | SOLLA | SOLLA-accredited care fees IFA specialists | Uses DDG + LinkedIn |
+    """)
+
+    st.subheader("Tips")
+    st.markdown("""
+    - **Start small** — 5 km, NHS + OSM + Web/Social. Add more sources once you know what's useful.
+    - **Re-run monthly** — new orgs appear and contacts change. CRM notes carry forward.
+    - **Bookmark your URL** — your login persists in the URL. Bookmark it to return without logging in.
+    - **Hospital departments** — each hospital generates up to 7 separate leads (discharge team,
+      CHC team, frailty unit, etc.). Use the hospital dept filter to pick only the ones relevant to you.
+    - **SOLLA IFAs** are the highest-value professional referrers for self-funders. Always include them.
+    """)
+
+
+# ── Page: Admin ───────────────────────────────────────────────────────────────
+
+elif page == "Admin":
+    if not _current_user.get("is_admin"):
+        st.error("Access denied.")
+        st.stop()
+
+    st.header("Admin")
+
+    # ── Users ─────────────────────────────────────────────────────────────────
+    st.subheader("Users")
+    users = _auth.get_all_users()
+
+    for u in users:
+        col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 1, 1])
+        with col1:
+            st.write(f"**{u['username']}**")
+        with col2:
+            st.write("Admin" if u["is_admin"] else "User")
+        with col3:
+            st.write(f"{u['search_count']} searches")
+        with col4:
+            last = (u["last_search"] or "—")[:10]
+            st.write(last)
+        with col5:
+            if u["id"] != _current_user["id"]:
+                new_admin = not u["is_admin"]
+                label = "Revoke admin" if u["is_admin"] else "Make admin"
+                if st.button(label, key=f"adm_tog_{u['id']}"):
+                    _auth.set_admin(u["id"], new_admin)
+                    st.rerun()
+            else:
+                st.write("(you)")
+
+    # ── All Searches ───────────────────────────────────────────────────────────
+    st.divider()
+    st.subheader("All Searches")
+    all_runs = queries.get_all_search_runs_with_users()
+    if not all_runs:
+        st.info("No searches yet.")
+    else:
+        table_rows = [
+            {
+                "User": r.get("username") or "—",
+                "Care Home": r["care_home_name"],
+                "Postcode": r["postcode"],
+                "Radius (km)": r["radius_km"],
+                "Leads": r["lead_count"],
+                "Date": (r["run_at"] or "")[:10],
+                "Run #": r["id"],
+            }
+            for r in all_runs
+        ]
+        st.dataframe(table_rows, use_container_width=True)

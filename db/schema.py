@@ -20,6 +20,21 @@ def init_db():
     with _lock:
         conn = get_connection()
         conn.executescript("""
+            CREATE TABLE IF NOT EXISTS users (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                username      TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                is_admin      INTEGER DEFAULT 0,
+                created_at    TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                token      TEXT PRIMARY KEY,
+                user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                expires_at TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+
             CREATE TABLE IF NOT EXISTS search_runs (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 care_home_name  TEXT NOT NULL,
@@ -28,6 +43,7 @@ def init_db():
                 lat             REAL,
                 lon             REAL,
                 sources         TEXT,
+                user_id         INTEGER REFERENCES users(id),
                 run_at          TEXT DEFAULT (datetime('now'))
             );
 
@@ -89,6 +105,7 @@ def init_db():
             "ALTER TABLE search_runs ADD COLUMN sources TEXT",
             "ALTER TABLE search_runs ADD COLUMN org_types TEXT",
             "ALTER TABLE search_runs ADD COLUMN hospital_depts TEXT",
+            "ALTER TABLE search_runs ADD COLUMN user_id INTEGER REFERENCES users(id)",
             "ALTER TABLE organisations ADD COLUMN email TEXT",
         ]:
             try:
