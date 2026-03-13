@@ -17,6 +17,8 @@ except ImportError:
 ENRICH_ROLES: dict[str, str] = {
     "GP":                   "practice manager",
     "hospital_discharge":   "discharge liaison nurse",
+    "hospital_chc":         "continuing healthcare coordinator",
+    "hospital_ot_discharge":"occupational therapist discharge",
     "hospital_private":     "private patient coordinator",
     "hospital_frailty":     "consultant geriatrician frailty",
     "hospital_dementia":    "dementia specialist nurse",

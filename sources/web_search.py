@@ -96,6 +96,12 @@ FACEBOOK_SEARCHES = [
 LINKEDIN_AREA_SEARCHES = [
     ("practice manager GP surgery",              "GP"),
     ("discharge liaison nurse hospital",         "hospital_discharge"),
+    ("complex discharge nurse NHS",              "hospital_discharge"),
+    ("discharge facilitator NHS hospital",       "hospital_discharge"),
+    ("discharge and flow coordinator NHS",       "hospital_discharge"),
+    ("continuing healthcare coordinator NHS",    "hospital_chc"),
+    ("continuing healthcare nurse assessor",     "hospital_chc"),
+    ("occupational therapist discharge NHS",     "hospital_ot_discharge"),
     ("hospital social worker discharge",         "hospital_social_work"),
     ("private client solicitor wills probate",   "solicitor"),
     ("independent financial adviser care fees",  "financial_adviser"),

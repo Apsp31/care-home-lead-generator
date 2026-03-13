@@ -319,8 +319,9 @@ DEFAULT_SOURCES = [
 # Org categories for the picker — label → list of org_type strings
 ORG_CATEGORY_OPTIONS: dict[str, list[str]] = {
     "Hospital departments": [
-        "hospital_private", "hospital_discharge", "hospital_frailty",
-        "hospital_dementia", "hospital_ortho", "hospital_stroke", "hospital_social_work",
+        "hospital_private", "hospital_discharge", "hospital_chc",
+        "hospital_frailty", "hospital_dementia", "hospital_ortho",
+        "hospital_stroke", "hospital_social_work", "hospital_ot_discharge",
     ],
     "GP surgeries":           ["GP"],
     "PCNs":                   ["PCN"],
@@ -345,11 +346,13 @@ ALL_ORG_CATEGORIES = list(ORG_CATEGORY_OPTIONS.keys())
 HOSPITAL_DEPT_OPTIONS: dict[str, str] = {
     "Private Patient Unit":         "hospital_private",
     "Discharge / Transfer of Care": "hospital_discharge",
+    "Continuing Healthcare (CHC)":  "hospital_chc",
     "Frailty & Elderly Care":       "hospital_frailty",
     "Memory Clinic / Dementia":     "hospital_dementia",
     "Trauma & Orthopaedics":        "hospital_ortho",
     "Stroke Rehabilitation":        "hospital_stroke",
     "Social Work Department":       "hospital_social_work",
+    "Discharge Occupational Therapy":"hospital_ot_discharge",
 }
 ALL_HOSPITAL_DEPTS = list(HOSPITAL_DEPT_OPTIONS.keys())
 
@@ -738,13 +741,15 @@ elif page == "Map View":
     # ── High-contrast colour palette ──────────────────────────────────────────
     _ORG_COLOUR: dict[str, str] = {
         # Hospitals — red family (darkest shades for highest priority)
-        "hospital_private":     "#7f0000",
-        "hospital_discharge":   "#b71c1c",
-        "hospital_frailty":     "#c62828",
-        "hospital_dementia":    "#d32f2f",
-        "hospital_ortho":       "#e53935",
-        "hospital_stroke":      "#ef5350",
-        "hospital_social_work": "#f44336",
+        "hospital_private":      "#7f0000",
+        "hospital_discharge":    "#b71c1c",
+        "hospital_chc":          "#880e4f",   # deep magenta — CHC sits outside the ward family
+        "hospital_frailty":      "#c62828",
+        "hospital_dementia":     "#d32f2f",
+        "hospital_ortho":        "#e53935",
+        "hospital_stroke":       "#ef5350",
+        "hospital_social_work":  "#f44336",
+        "hospital_ot_discharge": "#ad1457",   # mid magenta — OT discharge adjacent to CHC
         # Primary care — strong blue
         "GP":                   "#0d47a1",
         "PCN":                  "#1565c0",
@@ -1055,8 +1060,9 @@ elif page == "Feedback / CRM":
 
     # ── Build category groups ──────────────────────────────────────────────────
     HOSP_SUB_ORDER = [
-        "hospital_private", "hospital_discharge", "hospital_frailty",
-        "hospital_dementia", "hospital_ortho", "hospital_stroke", "hospital_social_work",
+        "hospital_private", "hospital_discharge", "hospital_chc",
+        "hospital_frailty", "hospital_dementia", "hospital_ortho",
+        "hospital_stroke", "hospital_social_work", "hospital_ot_discharge",
     ]
 
     crm_groups: list[tuple[str, list]] = []

@@ -9,13 +9,15 @@ TEMPLATE_DIR = Path(__file__).parent / "templates"
 
 ORG_TYPE_LABELS = {
     # Hospital departments
-    "hospital_private":     "Private Patient Units",
-    "hospital_discharge":   "Hospital Discharge / Transfer of Care Teams",
-    "hospital_frailty":     "Frailty & Elderly Care Units",
-    "hospital_dementia":    "Memory Clinics & Dementia Services",
-    "hospital_ortho":       "Trauma & Orthopaedics Departments",
-    "hospital_stroke":      "Stroke Rehabilitation Units",
-    "hospital_social_work": "Hospital Social Work Departments",
+    "hospital_private":      "Private Patient Units",
+    "hospital_discharge":    "Hospital Discharge / Transfer of Care Teams",
+    "hospital_chc":          "NHS Continuing Healthcare Teams",
+    "hospital_frailty":      "Frailty & Elderly Care Units",
+    "hospital_dementia":     "Memory Clinics & Dementia Services",
+    "hospital_ortho":        "Trauma & Orthopaedics Departments",
+    "hospital_stroke":       "Stroke Rehabilitation Units",
+    "hospital_social_work":  "Hospital Social Work Departments",
+    "hospital_ot_discharge": "Hospital Discharge Occupational Therapists",
     # Primary care
     "GP":                   "GP Surgeries",
     "PCN":                  "Primary Care Networks",

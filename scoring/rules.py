@@ -5,11 +5,13 @@ ORG_TYPE_BASE_SCORES: dict[str, float] = {
     # Hospital departments — each is a separate lead
     "hospital_private":     0.95,
     "hospital_discharge":   0.95,
+    "hospital_chc":         0.90,  # CHC assessors identify self-funders by definition
     "hospital_frailty":     0.90,
     "hospital_dementia":    0.90,
     "hospital_ortho":       0.85,
-    "hospital_stroke":      0.80,
     "hospital_social_work": 0.85,
+    "hospital_ot_discharge":0.75,
+    "hospital_stroke":      0.80,
     # Other clinical
     "GP":                   0.90,
     "PCN":                  0.75,
@@ -45,8 +47,10 @@ WEALTH_INDICATOR_SCORES: dict[str, float] = {
     "hospital_frailty":     0.80,
     "hospital_dementia":    0.80,
     "hospital_discharge":   0.75,  # high volume, mixed funding
+    "hospital_chc":         0.80,  # CHC ruling-out directly surfaces self-funders
     "hospital_stroke":      0.75,
     "hospital_social_work": 0.65,  # identifies self-funders above £23,250 threshold
+    "hospital_ot_discharge":0.60,
     "estate_agent":         0.75,  # selling home to fund care
     "GP":                   0.65,
     "hospice":              0.70,
@@ -82,6 +86,14 @@ QUALIFICATION_NOTES: dict[str, str] = {
     "hospital_stroke":
         "Stroke Rehabilitation Unit — ongoing care needs post-discharge; many patients fund care through "
         "property assets. Rehabilitation coordinator shapes placement pathway.",
+    "hospital_chc":
+        "NHS Continuing Healthcare Team — assesses every complex discharge patient for NHS-funded nursing "
+        "care. Patients who do not qualify (the majority) become self-funders by default. CHC coordinators "
+        "and nurse assessors are at the exact point where the funding question is resolved.",
+    "hospital_ot_discharge":
+        "Hospital Discharge Occupational Therapist — conducts functional assessments that determine whether "
+        "a patient can return home or requires care home placement. More accessible than social workers; "
+        "directly gates the placement pathway for post-acute patients.",
     "hospital_social_work":
         "Hospital Social Work Department — identifies and assesses self-funders (assets above £23,250 "
         "threshold). Principal social worker is a gatekeeper for private residential placements.",
