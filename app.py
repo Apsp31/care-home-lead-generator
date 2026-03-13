@@ -196,7 +196,7 @@ def _render_lead_card(lead: dict, show_qual_note: bool = True, expanded: bool = 
     emoji = STATUS_EMOJI.get(lead["status"], "")
     with st.expander(
         f"{emoji}**{lead['name']}** | :{sc}[{int(score*100)}] | "
-        f"{ORG_TYPE_LABELS.get(lead['org_type'], lead['org_type'])} | "
+        f"{_org_label(lead)} | "
         f"{lead['distance_km'] or '?'} km | {status_badge(lead['status'])}",
         expanded=expanded,
     ):
@@ -288,6 +288,12 @@ def _render_hospital_group(parent_name: str, depts: list, show_dept_qual: bool =
                     st.markdown(f"**Notes:** {_html.escape(dept['notes'])}")
                 st.divider()
                 _quick_status_buttons(dept["id"], dept["status"], key_prefix=f"hd_{dept['id']}_")
+
+
+def _org_label(lead: dict) -> str:
+    if lead.get("source") == "solla":
+        return "SOLLA Care Fees IFA"
+    return ORG_TYPE_LABELS.get(lead["org_type"], lead["org_type"].replace("_", " ").title())
 
 
 def _group_score(lst: list) -> float:
@@ -760,7 +766,7 @@ elif page == "Map View":
 
     def _popup_html(lead: dict, contacts: list[dict], estimated: bool = False) -> str:
         score_pct = int(lead["priority_score"] * 100)
-        label     = ORG_TYPE_LABELS.get(lead["org_type"], lead["org_type"])
+        label     = _org_label(lead)
         score_bg  = "#d4edda" if score_pct >= 70 else ("#fff3cd" if score_pct >= 40 else "#f8d7da")
         parts     = [lead.get("address_line1"), lead.get("town"), lead.get("postcode")]
         addr      = _html.escape(", ".join(p for p in parts if p) or "—")
@@ -991,12 +997,11 @@ elif page == "Feedback / CRM":
 
     st.divider()
 
-    for lead in leads:
+    def _crm_lead_row(lead: dict):
         contacts = queries.get_contacts_for_org(lead["org_id"])
-
+        emoji = STATUS_EMOJI.get(lead["status"], "")
         with st.expander(
-            f"**{lead['name']}** | {ORG_TYPE_LABELS.get(lead['org_type'], lead['org_type'])} | "
-            f"{status_badge(lead['status'])}",
+            f"{emoji}**{_html.escape(lead['name'])}** | {status_badge(lead['status'])}",
             expanded=(lead["status"] == "new"),
         ):
             col1, col2 = st.columns([1, 2])
@@ -1028,6 +1033,64 @@ elif page == "Feedback / CRM":
                     queries.update_lead_status(lead["id"], new_status, new_notes)
                     st.success("Saved.")
                     st.rerun()
+
+    # ── Build category groups ──────────────────────────────────────────────────
+    HOSP_SUB_ORDER = [
+        "hospital_private", "hospital_discharge", "hospital_frailty",
+        "hospital_dementia", "hospital_ortho", "hospital_stroke", "hospital_social_work",
+    ]
+
+    crm_groups: list[tuple[str, list]] = []
+
+    # SOLLA as its own top-level category (source == "solla", regardless of org_type)
+    solla_leads = [l for l in leads if l.get("source") == "solla"]
+    if solla_leads:
+        crm_groups.append(("SOLLA Care Fees IFAs", solla_leads))
+
+    solla_ids = {l["id"] for l in solla_leads}
+
+    for cat_label, org_types in ORG_CATEGORY_OPTIONS.items():
+        if cat_label == "IFAs":
+            # IFAs that are NOT SOLLA
+            cat_leads = [l for l in leads
+                         if l["org_type"] in org_types and l["id"] not in solla_ids]
+        else:
+            cat_leads = [l for l in leads if l["org_type"] in org_types]
+        if cat_leads:
+            crm_groups.append((cat_label, cat_leads))
+
+    # Anything that fell through (unknown org types)
+    categorised = {l["id"] for _, grp in crm_groups for l in grp}
+    orphans = [l for l in leads if l["id"] not in categorised]
+    if orphans:
+        crm_groups.append(("Other", orphans))
+
+    # ── Render grouped ─────────────────────────────────────────────────────────
+    for cat_label, cat_leads in crm_groups:
+        new_count = sum(1 for l in cat_leads if l["status"] == "new")
+        badge = f" · {new_count} new" if new_count else ""
+        header = f"**{cat_label}** ({len(cat_leads)}{badge})"
+
+        with st.expander(header, expanded=False):
+            if cat_label == "Hospital departments":
+                # Sub-group by hospital type
+                sub_map: dict[str, list] = {}
+                for lead in cat_leads:
+                    sub_map.setdefault(lead["org_type"], []).append(lead)
+                for sub_type in [t for t in HOSP_SUB_ORDER if t in sub_map]:
+                    sub_leads = sub_map[sub_type]
+                    sub_label = ORG_TYPE_LABELS.get(sub_type, sub_type)
+                    sub_new = sum(1 for l in sub_leads if l["status"] == "new")
+                    sub_badge = f" · {sub_new} new" if sub_new else ""
+                    with st.expander(
+                        f"*{sub_label}* ({len(sub_leads)}{sub_badge})",
+                        expanded=False,
+                    ):
+                        for lead in sorted(sub_leads, key=lambda x: x["priority_score"], reverse=True):
+                            _crm_lead_row(lead)
+            else:
+                for lead in sorted(cat_leads, key=lambda x: x["priority_score"], reverse=True):
+                    _crm_lead_row(lead)
 
 
 # ── Page: Scoring Weights ─────────────────────────────────────────────────────
