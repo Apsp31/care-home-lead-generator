@@ -7,3 +7,7 @@ geopy>=2.4
 tqdm>=4.66
 overpass>=0.7
 ddgs>=9.0
+folium>=0.17
+streamlit-folium>=0.20
+beautifulsoup4>=4.12
+lxml>=5.0

@@ -40,7 +40,7 @@ with st.sidebar:
     st.divider()
     page = st.radio(
         "Navigate",
-        ["New Search", "Lead Dashboard", "Feedback / CRM", "Scoring Weights"],
+        ["New Search", "Lead Dashboard", "Map View", "Feedback / CRM", "Scoring Weights"],
         label_visibility="collapsed",
     )
     st.divider()
@@ -566,6 +566,252 @@ elif page == "Lead Dashboard":
                     _render_lead_card(lead, show_qual_note=False)
 
             st.markdown("")  # spacer between sections
+
+
+# ── Page: Map View ────────────────────────────────────────────────────────────
+
+elif page == "Map View":
+    import folium
+    from streamlit_folium import st_folium
+
+    st.header("Map View")
+
+    runs = queries.get_all_search_runs()
+    if not runs:
+        st.info("No searches yet. Run a search first.")
+        st.stop()
+
+    run_options = {
+        f"{r['care_home_name']} — {r['postcode']} ({r['run_at'][:10]}) [#{r['id']}]": r["id"]
+        for r in runs
+    }
+    default_run = st.session_state.get("active_run_id", runs[0]["id"])
+    default_label = next(
+        (k for k, v in run_options.items() if v == default_run),
+        list(run_options.keys())[0]
+    )
+    selected_label = st.selectbox(
+        "Search Run", list(run_options.keys()),
+        index=list(run_options.keys()).index(default_label),
+        key="map_run_select",
+    )
+    run_id = run_options[selected_label]
+    run = queries.get_search_run(run_id)
+
+    leads = queries.get_leads_for_run(run_id)
+    if not leads:
+        st.info("No leads for this run.")
+        st.stop()
+
+    # ── Filters ───────────────────────────────────────────────────────────────
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        map_type_filter = st.multiselect(
+            "Org categories",
+            options=ALL_ORG_CATEGORIES,
+            default=[],
+            key="map_type_filter",
+            placeholder="All categories",
+        )
+    with col2:
+        map_status_filter = st.multiselect(
+            "Status",
+            options=STATUS_OPTIONS,
+            default=[],
+            key="map_status_filter",
+            placeholder="All statuses",
+        )
+    with col3:
+        map_min_score = st.slider("Min score", 0.0, 1.0, 0.0, 0.05, key="map_score")
+
+    # Resolve category filter → org_type set
+    if map_type_filter:
+        allowed_types: set[str] | None = set()
+        for cat in map_type_filter:
+            allowed_types.update(ORG_CATEGORY_OPTIONS.get(cat, []))
+    else:
+        allowed_types = None  # all
+
+    filtered_leads = [
+        l for l in leads
+        if l["priority_score"] >= map_min_score
+        and (not allowed_types or l["org_type"] in allowed_types)
+        and (not map_status_filter or l["status"] in map_status_filter)
+        and l.get("lat") and l.get("lon")
+    ]
+
+    # Separate leads with precise coords vs estimated (distance_km == 0, not a hospital)
+    precise = [l for l in filtered_leads if l.get("distance_km", 0) > 0.01]
+    estimated = [l for l in filtered_leads if l.get("distance_km", 0) <= 0.01]
+
+    care_lat = run["lat"]
+    care_lon = run["lon"]
+    radius_km = run["radius_km"]
+
+    st.caption(
+        f"Showing {len(precise)} leads with known locations"
+        + (f" + {len(estimated)} with estimated location" if estimated else "")
+        + f" | {len(leads) - len(filtered_leads)} hidden by filters"
+    )
+
+    # ── Colour scheme: by priority score ──────────────────────────────────────
+    # Org-type to colour group for marker fill
+    _ORG_COLOUR: dict[str, str] = {
+        # Hospitals
+        "hospital_private": "#c0392b", "hospital_discharge": "#c0392b",
+        "hospital_frailty": "#e74c3c", "hospital_dementia": "#e74c3c",
+        "hospital_ortho": "#e67e22",   "hospital_stroke": "#e67e22",
+        "hospital_social_work": "#d35400",
+        # Primary care
+        "GP": "#2980b9", "PCN": "#3498db",
+        # Clinical
+        "hospice": "#1abc9c", "pharmacy": "#16a085",
+        # Professional
+        "solicitor": "#8e44ad", "wealth_manager": "#9b59b6",
+        "financial_adviser": "#6c3483", "estate_agent": "#a569bd",
+        # Statutory
+        "social_services": "#1f618d",
+        # Community specialist
+        "dementia_cafe": "#27ae60", "age_uk_branch": "#2ecc71",
+        "carers_group": "#52be80", "day_centre": "#82e0aa",
+        # Community general
+        "community_group": "#abebc6", "place_of_worship": "#d5f5e3",
+        "nursing_home": "#95a5a6",
+    }
+
+    def _marker_colour(lead: dict) -> str:
+        return _ORG_COLOUR.get(lead["org_type"], "#7f8c8d")
+
+    def _popup_html(lead: dict) -> str:
+        score_pct = int(lead["priority_score"] * 100)
+        label = ORG_TYPE_LABELS.get(lead["org_type"], lead["org_type"])
+        status_col = STATUS_COLOURS.get(lead["status"], "gray")
+        parts = [lead.get("address_line1"), lead.get("town"), lead.get("postcode")]
+        addr = ", ".join(p for p in parts if p) or "—"
+        phone = f"<br/>📞 {lead['phone']}" if lead.get("phone") else ""
+        dist = f"<br/>📍 {lead['distance_km']} km" if lead.get("distance_km") else ""
+        return (
+            f"<div style='font-family:sans-serif;min-width:180px;max-width:250px'>"
+            f"<b style='font-size:13px'>{lead['name']}</b><br/>"
+            f"<span style='color:#555;font-size:11px'>{label}</span><br/>"
+            f"<span style='background:{'#d4edda' if score_pct>=70 else ('#fff3cd' if score_pct>=40 else '#f8d7da')};"
+            f"padding:1px 5px;border-radius:3px;font-size:11px;font-weight:600'>"
+            f"Score {score_pct}</span>"
+            f"<span style='font-size:11px;margin-left:6px;color:{status_col}'>"
+            f"{lead['status'].replace('_',' ').upper()}</span>"
+            f"<br/><span style='font-size:11px;color:#666'>{addr}{phone}{dist}</span>"
+            f"</div>"
+        )
+
+    # ── Build the map ─────────────────────────────────────────────────────────
+    m = folium.Map(
+        location=[care_lat, care_lon],
+        zoom_start=13,
+        tiles="CartoDB positron",
+    )
+
+    # Radius rings
+    ring_style = dict(color="#1a3a5c", fill=True, fill_opacity=0.04, weight=1.5)
+    folium.Circle(
+        location=[care_lat, care_lon],
+        radius=radius_km * 1000,
+        popup=f"{radius_km} km radius",
+        **ring_style,
+    ).add_to(m)
+    if radius_km > 2:
+        folium.Circle(
+            location=[care_lat, care_lon],
+            radius=radius_km * 1000 / 2,
+            color="#1a3a5c", fill=False, weight=1, dash_array="5 5",
+            popup=f"{radius_km/2:.1f} km",
+        ).add_to(m)
+    if radius_km > 4:
+        folium.Circle(
+            location=[care_lat, care_lon],
+            radius=radius_km * 1000 / 3,
+            color="#1a3a5c", fill=False, weight=1, dash_array="3 8",
+            popup=f"{radius_km/3:.1f} km",
+        ).add_to(m)
+
+    # Care home marker
+    folium.Marker(
+        location=[care_lat, care_lon],
+        popup=folium.Popup(
+            f"<b>{run['care_home_name']}</b><br/>{run['postcode']}", max_width=200
+        ),
+        tooltip=run["care_home_name"],
+        icon=folium.Icon(color="red", icon="home", prefix="fa"),
+    ).add_to(m)
+
+    # Lead markers (precise location)
+    for lead in precise:
+        colour = _marker_colour(lead)
+        folium.CircleMarker(
+            location=[lead["lat"], lead["lon"]],
+            radius=7,
+            color=colour,
+            fill=True,
+            fill_color=colour,
+            fill_opacity=0.75,
+            weight=1.5,
+            popup=folium.Popup(_popup_html(lead), max_width=260),
+            tooltip=lead["name"],
+        ).add_to(m)
+
+    # Estimated-location leads — small grey cluster near care home with offset
+    for i, lead in enumerate(estimated):
+        angle_offset = i * 0.0003
+        folium.CircleMarker(
+            location=[care_lat + angle_offset, care_lon + angle_offset * 0.7],
+            radius=5,
+            color="#95a5a6",
+            fill=True,
+            fill_color=_marker_colour(lead),
+            fill_opacity=0.5,
+            weight=1,
+            popup=folium.Popup(
+                _popup_html(lead) + "<br/><i style='font-size:10px;color:#888'>Location estimated</i>",
+                max_width=260
+            ),
+            tooltip=f"{lead['name']} (estimated)",
+            dash_array="4 4",
+        ).add_to(m)
+
+    # Fit map to all precise markers + care home
+    all_lats = [care_lat] + [l["lat"] for l in precise]
+    all_lons = [care_lon] + [l["lon"] for l in precise]
+    if len(all_lats) > 1:
+        m.fit_bounds([
+            [min(all_lats), min(all_lons)],
+            [max(all_lats), max(all_lons)],
+        ])
+
+    # ── Legend ────────────────────────────────────────────────────────────────
+    legend_groups = [
+        ("Hospitals",            "#c0392b"),
+        ("GP / PCN",             "#2980b9"),
+        ("Clinical",             "#1abc9c"),
+        ("Professional referrers","#8e44ad"),
+        ("Statutory",            "#1f618d"),
+        ("Community",            "#27ae60"),
+        ("Estimated location",   "#95a5a6"),
+    ]
+    legend_html = (
+        "<div style='position:fixed;bottom:30px;left:30px;z-index:1000;"
+        "background:white;padding:10px 14px;border-radius:6px;"
+        "box-shadow:0 1px 5px rgba(0,0,0,.3);font-family:sans-serif;font-size:12px'>"
+        "<b style='font-size:13px'>Lead types</b><br/>"
+        + "".join(
+            f"<span style='display:inline-block;width:11px;height:11px;"
+            f"background:{c};border-radius:50%;margin-right:5px'></span>{g}<br/>"
+            for g, c in legend_groups
+        )
+        + "<span style='display:inline-block;font-size:16px;color:red;margin-right:5px'>🏠</span>Care home<br/>"
+        "</div>"
+    )
+    m.get_root().html.add_child(folium.Element(legend_html))
+
+    st_folium(m, use_container_width=True, height=620, returned_objects=[])
 
 
 # ── Page: Feedback / CRM ──────────────────────────────────────────────────────
