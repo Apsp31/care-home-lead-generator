@@ -38,7 +38,7 @@ st.set_page_config(
 
 with st.sidebar:
     st.title("Lead Generator")
-    st.caption("Care home referral outreach")
+    st.caption("Care home referral outreach · v1.2")
     st.divider()
     page = st.radio(
         "Navigate",
