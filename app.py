@@ -17,6 +17,7 @@ from sources.nhs_ods import NHSODSSource
 from sources.overpass import OverpassSource
 from sources.companies_house import CompaniesHouseSource
 from sources.web_search import WebSearchSource
+from sources.solla import SollaSource
 from sources.enrichment import enrich_contacts, ENRICH_ROLES
 from scoring.engine import score_org, get_feedback_weights, recalculate_scores_for_run
 from scoring.rules import QUALIFICATION_NOTES
@@ -44,6 +45,7 @@ with st.sidebar:
     )
     st.divider()
     st.caption("Set COMPANIES_HOUSE_API_KEY in .env to enable Companies House data.")
+    st.caption("SOLLA source searches LinkedIn & web for care fees IFA specialists.")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -76,6 +78,8 @@ def run_sources(lat, lon, radius_km, selected_sources, hospital_dept_types=None)
         sources.append(CompaniesHouseSource())
     if "Web / Social (dementia cafes, LinkedIn, Facebook)" in selected_sources:
         sources.append(WebSearchSource())
+    if "SOLLA (care fees IFA specialists)" in selected_sources:
+        sources.append(SollaSource())
 
     all_orgs = []
     errors = []
@@ -111,6 +115,7 @@ ALL_SOURCES = [
     "OpenStreetMap (hospices, pharmacies, community)",
     "Companies House (solicitors, estate agents)",
     "Web / Social (dementia cafes, LinkedIn, Facebook)",
+    "SOLLA (care fees IFA specialists)",
 ]
 DEFAULT_SOURCES = [
     "NHS (GPs, hospitals, PCNs)",
