@@ -196,8 +196,8 @@ def _render_lead_card(lead: dict, show_qual_note: bool = True, expanded: bool = 
 
     emoji = STATUS_EMOJI.get(lead["status"], "")
     with st.expander(
-        f"{emoji}**{lead['name']}** | :{sc}[{int(score*100)}] | "
-        f"{_org_label(lead)} | "
+        f"{emoji}**{_html.escape(lead['name'])}** | :{sc}[{int(score*100)}] | "
+        f"{_html.escape(_org_label(lead))} | "
         f"{lead['distance_km'] or '?'} km | {status_badge(lead['status'])}",
         expanded=expanded,
     ):
@@ -246,7 +246,7 @@ def _render_hospital_group(parent_name: str, depts: list, show_dept_qual: bool =
     sc = "green" if best["priority_score"] >= 0.7 else (
         "orange" if best["priority_score"] >= 0.4 else "red")
     with st.expander(
-        f"🏥 **{parent_name}** | :{sc}[{int(best['priority_score']*100)}] | "
+        f"🏥 **{_html.escape(parent_name)}** | :{sc}[{int(best['priority_score']*100)}] | "
         f"{len(depts)} departments | {best['distance_km'] or '?'} km",
         expanded=False,
     ):
