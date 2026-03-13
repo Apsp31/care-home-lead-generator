@@ -557,7 +557,7 @@ elif page == "Lead Dashboard":
     # ── View mode toggle ───────────────────────────────────────────────────────
     view_mode = st.radio(
         "Group by",
-        ["By score", "By org type"],
+        ["By org type", "By score"],
         horizontal=True,
         label_visibility="collapsed",
     )
@@ -585,18 +585,28 @@ elif page == "Lead Dashboard":
                 _render_hospital_group(payload[0], payload[1], show_dept_qual=True)
 
     else:  # By org type
-        # Build type → leads mapping (non-hospital)
+        # Build type → leads mapping; split SOLLA from regular IFAs
         type_map: dict[str, list] = {}
         for lead in other_leads:
-            type_map.setdefault(lead["org_type"], []).append(lead)
+            if lead["org_type"] == "financial_adviser" and lead.get("source") == "solla":
+                type_map.setdefault("_solla", []).append(lead)
+            else:
+                type_map.setdefault(lead["org_type"], []).append(lead)
 
-        # Hospital types → one virtual type bucket per parent hospital group
+        # Hospital types → one virtual bucket per parent hospital group
         if hosp_groups:
-            type_map["_hospitals"] = list(hosp_groups.items())  # list of (parent, depts)
+            type_map["_hospitals"] = list(hosp_groups.items())
 
-        # Render in priority order
-        ordered_types = [t for t in TYPE_ORDER if t in type_map or t == "_hospitals"]
-        # Tack on any types not in TYPE_ORDER
+        # Render in priority order; inject _solla after financial_adviser slot
+        ordered_types: list[str] = []
+        for t in TYPE_ORDER:
+            if t == "financial_adviser":
+                if "_solla" in type_map:
+                    ordered_types.append("_solla")
+                if t in type_map:
+                    ordered_types.append(t)
+            elif t in type_map or t == "_hospitals":
+                ordered_types.append(t)
         for t in type_map:
             if t not in ordered_types:
                 ordered_types.append(t)
@@ -609,23 +619,31 @@ elif page == "Lead Dashboard":
             if org_type == "_hospitals":
                 label = "Hospitals (all departments)"
                 qual = QUALIFICATION_NOTES.get("hospital_discharge", "")
+                n = sum(len(d) for _, d in items)
+            elif org_type == "_solla":
+                label = "SOLLA Care Fees IFAs"
+                qual = QUALIFICATION_NOTES.get("financial_adviser", "")
+                n = len(items)
             else:
                 label = ORG_TYPE_LABELS.get(org_type, org_type.replace("_", " ").title())
                 qual = QUALIFICATION_NOTES.get(org_type, "")
+                n = len(items)
 
-            n = len(items) if org_type != "_hospitals" else sum(len(d) for _, d in items)
-            st.markdown(f"### {label} ({n})")
-            if qual:
-                st.info(qual)
-
-            if org_type == "_hospitals":
-                for parent_name, depts in sorted(items, key=lambda x: _group_score(x[1]), reverse=True):
-                    _render_hospital_group(parent_name, depts, show_dept_qual=False)
-            else:
-                for lead in sorted(items, key=lambda x: x["priority_score"], reverse=True):
-                    _render_lead_card(lead, show_qual_note=False)
-
-            st.markdown("")  # spacer between sections
+            new_count = sum(
+                1 for x in (items if org_type != "_hospitals"
+                            else [l for _, d in items for l in d])
+                if x.get("status") == "new"
+            )
+            badge = f" · {new_count} new" if new_count else ""
+            with st.expander(f"**{label}** ({n}{badge})", expanded=False):
+                if qual:
+                    st.info(qual)
+                if org_type == "_hospitals":
+                    for parent_name, depts in sorted(items, key=lambda x: _group_score(x[1]), reverse=True):
+                        _render_hospital_group(parent_name, depts, show_dept_qual=False)
+                else:
+                    for lead in sorted(items, key=lambda x: x["priority_score"], reverse=True):
+                        _render_lead_card(lead, show_qual_note=False)
 
 
 # ── Page: Map View ────────────────────────────────────────────────────────────
