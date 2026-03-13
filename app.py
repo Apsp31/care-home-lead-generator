@@ -1347,6 +1347,7 @@ elif page == "Instructions":
 
     st.subheader("Tips")
     st.markdown("""
+    - **Keep the tab open during a search** — searches run in your browser session. Switching to another app is fine, but closing the tab or browser will cancel the search.
     - **Start small** — 5 km, NHS + OSM + Web/Social. Add more sources once you know what's useful.
     - **Re-run monthly** — new orgs appear and contacts change. CRM notes carry forward.
     - **Bookmark your URL** — your login persists in the URL. Bookmark it to return without logging in.
