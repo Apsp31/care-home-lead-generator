@@ -133,6 +133,23 @@ def get_contacts_for_org(org_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_contacts_for_orgs(org_ids: list[int]) -> dict[int, list[dict]]:
+    """Batch fetch contacts for multiple orgs. Returns {org_id: [contacts]}."""
+    if not org_ids:
+        return {}
+    placeholders = ",".join("?" for _ in org_ids)
+    conn = get_connection()
+    rows = conn.execute(
+        f"SELECT * FROM contacts WHERE org_id IN ({placeholders})", org_ids
+    ).fetchall()
+    conn.close()
+    result: dict[int, list[dict]] = {}
+    for r in rows:
+        d = dict(r)
+        result.setdefault(d["org_id"], []).append(d)
+    return result
+
+
 # --- Leads ---
 
 def upsert_lead(org_id: int, run_id: int, score: float, breakdown: dict) -> int:

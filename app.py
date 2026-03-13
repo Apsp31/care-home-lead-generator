@@ -5,6 +5,8 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from urllib.parse import quote_plus
+
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -21,7 +23,7 @@ from sources.solla import SollaSource
 from sources.enrichment import enrich_contacts, ENRICH_ROLES
 from scoring.engine import score_org, get_feedback_weights, recalculate_scores_for_run
 from scoring.rules import QUALIFICATION_NOTES
-from reports.html_report import generate_report, ORG_TYPE_LABELS
+from reports.html_report import generate_report, ORG_TYPE_LABELS, TYPE_ORDER
 
 init_db()
 
@@ -106,6 +108,141 @@ def save_orgs_to_db(orgs, run_id, radius_km, feedback_weights):
             queries.insert_contacts(org_id, contacts)
         score, breakdown = score_org(org, radius_km, feedback_weights)
         queries.upsert_lead(org_id, run_id, score, breakdown)
+
+
+# ── Shared rendering helpers ──────────────────────────────────────────────────
+
+def _social_links(name: str, town: str) -> str:
+    q = quote_plus(f"{name} {town}".strip())
+    li = f"https://www.linkedin.com/search/results/companies/?keywords={q}"
+    fb = f"https://www.facebook.com/search/top?q={q}"
+    return f"[LinkedIn]({li}) · [Facebook]({fb})"
+
+
+def _render_contacts(contacts: list[dict]):
+    """Named contacts in full; collapse pure-placeholder rows to a hint line."""
+    real = [c for c in contacts
+            if c.get("name") or c.get("email") or c.get("phone")]
+    placeholders = [c for c in contacts
+                    if not c.get("name") and not c.get("email") and not c.get("phone")]
+
+    for c in real:
+        if c.get("name"):
+            st.markdown(f"- **{c['name']}** — {c['role']}")
+        else:
+            st.markdown(f"- _{c['role']}_")
+        if c.get("email"):
+            st.markdown(f"  - Email: {c['email']}")
+        if c.get("phone"):
+            st.markdown(f"  - Phone: {c['phone']}")
+        note = c.get("source_notes", "")
+        if note and note not in ("Role placeholder",):
+            st.caption(f"  {note}")
+
+    if placeholders:
+        roles = " · ".join(c["role"] for c in placeholders)
+        prefix = "Also look for:" if real else "If no named contact found, look for:"
+        st.caption(f"{prefix} {roles}")
+
+    if not real and not placeholders:
+        st.caption("No contacts on record — use Find online links to locate.")
+
+
+def _render_lead_card(lead: dict, show_qual_note: bool = True, expanded: bool = False):
+    score = lead["priority_score"]
+    sc = "green" if score >= 0.7 else ("orange" if score >= 0.4 else "red")
+    contacts = queries.get_contacts_for_org(lead["org_id"])
+
+    with st.expander(
+        f"**{lead['name']}** | :{sc}[{int(score*100)}] | "
+        f"{ORG_TYPE_LABELS.get(lead['org_type'], lead['org_type'])} | "
+        f"{lead['distance_km'] or '?'} km | {status_badge(lead['status'])}",
+        expanded=expanded,
+    ):
+        if show_qual_note:
+            qual = QUALIFICATION_NOTES.get(lead["org_type"], "")
+            if qual:
+                st.info(qual)
+
+        c1, c2 = st.columns(2)
+        with c1:
+            parts = [lead.get("address_line1"), lead.get("address_line2"),
+                     lead.get("town"), lead.get("postcode")]
+            addr = ", ".join(p for p in parts if p)
+            st.markdown(f"**Address:** {addr or '—'}")
+            if lead.get("phone"):
+                st.markdown(f"**Phone:** {lead['phone']}")
+            if lead.get("email"):
+                st.markdown(f"**Email:** {lead['email']}")
+            if lead.get("website"):
+                st.markdown(f"**Website:** {lead['website']}")
+            st.markdown(f"**Distance:** {lead.get('distance_km')} km")
+            st.markdown(f"**Find online:** {_social_links(lead['name'], lead.get('town', ''))}")
+            breakdown = json.loads(lead.get("score_breakdown") or "{}")
+            if breakdown:
+                bd = breakdown
+                st.caption(
+                    f"Score: type={bd.get('type_score','?')} · "
+                    f"wealth={bd.get('wealth_indicator','?')} · "
+                    f"dist={bd.get('distance_score','?')} · "
+                    f"completeness={bd.get('completeness','?')}"
+                )
+        with c2:
+            st.markdown("**Contacts:**")
+            _render_contacts(contacts)
+
+        if lead.get("notes"):
+            st.markdown(f"**Notes:** {lead['notes']}")
+
+
+def _render_hospital_group(parent_name: str, depts: list, show_dept_qual: bool = True):
+    best = max(depts, key=lambda x: x["priority_score"])
+    sc = "green" if best["priority_score"] >= 0.7 else (
+        "orange" if best["priority_score"] >= 0.4 else "red")
+    with st.expander(
+        f"🏥 **{parent_name}** | :{sc}[{int(best['priority_score']*100)}] | "
+        f"{len(depts)} departments | {best['distance_km'] or '?'} km",
+        expanded=False,
+    ):
+        d = depts[0]
+        parts = [d.get("address_line1"), d.get("address_line2"),
+                 d.get("town"), d.get("postcode")]
+        addr = ", ".join(p for p in parts if p)
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown(f"**Address:** {addr or '—'}")
+            if d.get("phone"):
+                st.markdown(f"**Switchboard:** {d['phone']}")
+            if d.get("email"):
+                st.markdown(f"**Email:** {d['email']}")
+            if d.get("website"):
+                st.markdown(f"**Website:** {d['website']}")
+            st.markdown(f"**Distance:** {d.get('distance_km')} km")
+            st.markdown(f"**Find online:** {_social_links(parent_name, d.get('town', ''))}")
+        with c2:
+            st.markdown(f"**{len(depts)} departments to target** — expand each below.")
+
+        st.divider()
+        for dept in sorted(depts, key=lambda x: x["priority_score"], reverse=True):
+            dept_label = dept["name"].split(" — ", 1)[1] if " — " in dept["name"] else dept["name"]
+            dept_contacts = queries.get_contacts_for_org(dept["org_id"])
+            score = dept["priority_score"]
+            sc2 = "green" if score >= 0.7 else ("orange" if score >= 0.4 else "red")
+            with st.expander(
+                f"**{dept_label}** | :{sc2}[{int(score*100)}] | {status_badge(dept['status'])}",
+                expanded=False,
+            ):
+                if show_dept_qual:
+                    qual = QUALIFICATION_NOTES.get(dept["org_type"], "")
+                    if qual:
+                        st.info(qual)
+                _render_contacts(dept_contacts)
+                if dept.get("notes"):
+                    st.markdown(f"**Notes:** {dept['notes']}")
+
+
+def _group_score(lst: list) -> float:
+    return max(l["priority_score"] for l in lst)
 
 
 # ── Page: New Search ──────────────────────────────────────────────────────────
@@ -359,138 +496,6 @@ elif page == "Lead Dashboard":
             st.success("Scores updated from feedback data.")
             st.rerun()
 
-    from urllib.parse import quote_plus
-    from reports.html_report import TYPE_ORDER
-
-    def _social_links(name: str, town: str) -> str:
-        q = quote_plus(f"{name} {town}".strip())
-        li = f"https://www.linkedin.com/search/results/companies/?keywords={q}"
-        fb = f"https://www.facebook.com/search/top?q={q}"
-        return f"[LinkedIn]({li}) · [Facebook]({fb})"
-
-    def _render_contacts(contacts: list[dict]):
-        """
-        Show contacts that have real names/details in full.
-        Collapse pure placeholder rows (no name, no email, no phone) into
-        a single 'Look for: Role1 · Role2' hint line.
-        """
-        real = [c for c in contacts
-                if c.get("name") or c.get("email") or c.get("phone")]
-        placeholders = [c for c in contacts
-                        if not c.get("name") and not c.get("email") and not c.get("phone")]
-
-        for c in real:
-            if c.get("name"):
-                st.markdown(f"- **{c['name']}** — {c['role']}")
-            else:
-                st.markdown(f"- _{c['role']}_")
-            if c.get("email"):
-                st.markdown(f"  - Email: {c['email']}")
-            if c.get("phone"):
-                st.markdown(f"  - Phone: {c['phone']}")
-            note = c.get("source_notes", "")
-            if note and note not in ("Role placeholder",):
-                st.caption(f"  {note}")
-
-        if placeholders:
-            roles = " · ".join(c["role"] for c in placeholders)
-            prefix = "Also look for:" if real else "If no named contact found, look for:"
-            st.caption(f"{prefix} {roles}")
-
-        if not real and not placeholders:
-            st.caption("No contacts on record — use Find online links to locate.")
-
-    def _render_lead_card(lead: dict, show_qual_note: bool = True):
-        score = lead["priority_score"]
-        sc = "green" if score >= 0.7 else ("orange" if score >= 0.4 else "red")
-        contacts = queries.get_contacts_for_org(lead["org_id"])
-
-        with st.expander(
-            f"**{lead['name']}** | :{sc}[{int(score*100)}] | "
-            f"{ORG_TYPE_LABELS.get(lead['org_type'], lead['org_type'])} | "
-            f"{lead['distance_km'] or '?'} km | {status_badge(lead['status'])}",
-            expanded=False,
-        ):
-            if show_qual_note:
-                qual = QUALIFICATION_NOTES.get(lead["org_type"], "")
-                if qual:
-                    st.info(qual)
-
-            c1, c2 = st.columns(2)
-            with c1:
-                parts = [lead.get("address_line1"), lead.get("address_line2"),
-                         lead.get("town"), lead.get("postcode")]
-                addr = ", ".join(p for p in parts if p)
-                st.markdown(f"**Address:** {addr or '—'}")
-                if lead.get("phone"):
-                    st.markdown(f"**Phone:** {lead['phone']}")
-                if lead.get("email"):
-                    st.markdown(f"**Email:** {lead['email']}")
-                if lead.get("website"):
-                    st.markdown(f"**Website:** {lead['website']}")
-                st.markdown(f"**Distance:** {lead.get('distance_km')} km")
-                st.markdown(f"**Find online:** {_social_links(lead['name'], lead.get('town', ''))}")
-                breakdown = json.loads(lead.get("score_breakdown") or "{}")
-                if breakdown:
-                    bd = breakdown
-                    st.caption(
-                        f"Score: type={bd.get('type_score','?')} · "
-                        f"wealth={bd.get('wealth_indicator','?')} · "
-                        f"dist={bd.get('distance_score','?')} · "
-                        f"completeness={bd.get('completeness','?')}"
-                    )
-            with c2:
-                st.markdown("**Contacts:**")
-                _render_contacts(contacts)
-
-            if lead.get("notes"):
-                st.markdown(f"**Notes:** {lead['notes']}")
-
-    def _render_hospital_group(parent_name: str, depts: list, show_dept_qual: bool = True):
-        best = max(depts, key=lambda x: x["priority_score"])
-        sc = "green" if best["priority_score"] >= 0.7 else (
-            "orange" if best["priority_score"] >= 0.4 else "red")
-        with st.expander(
-            f"🏥 **{parent_name}** | :{sc}[{int(best['priority_score']*100)}] | "
-            f"{len(depts)} departments | {best['distance_km'] or '?'} km",
-            expanded=False,
-        ):
-            d = depts[0]
-            parts = [d.get("address_line1"), d.get("address_line2"),
-                     d.get("town"), d.get("postcode")]
-            addr = ", ".join(p for p in parts if p)
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown(f"**Address:** {addr or '—'}")
-                if d.get("phone"):
-                    st.markdown(f"**Switchboard:** {d['phone']}")
-                if d.get("email"):
-                    st.markdown(f"**Email:** {d['email']}")
-                if d.get("website"):
-                    st.markdown(f"**Website:** {d['website']}")
-                st.markdown(f"**Distance:** {d.get('distance_km')} km")
-                st.markdown(f"**Find online:** {_social_links(parent_name, d.get('town', ''))}")
-            with c2:
-                st.markdown(f"**{len(depts)} departments to target** — expand each below.")
-
-            st.divider()
-            for dept in sorted(depts, key=lambda x: x["priority_score"], reverse=True):
-                dept_label = dept["name"].split(" — ", 1)[1] if " — " in dept["name"] else dept["name"]
-                dept_contacts = queries.get_contacts_for_org(dept["org_id"])
-                score = dept["priority_score"]
-                sc2 = "green" if score >= 0.7 else ("orange" if score >= 0.4 else "red")
-                with st.expander(
-                    f"**{dept_label}** | :{sc2}[{int(score*100)}] | {status_badge(dept['status'])}",
-                    expanded=False,
-                ):
-                    if show_dept_qual:
-                        qual = QUALIFICATION_NOTES.get(dept["org_type"], "")
-                        if qual:
-                            st.info(qual)
-                    _render_contacts(dept_contacts)
-                    if dept.get("notes"):
-                        st.markdown(f"**Notes:** {dept['notes']}")
-
     # ── View mode toggle ───────────────────────────────────────────────────────
     view_mode = st.radio(
         "Group by",
@@ -507,9 +512,6 @@ elif page == "Lead Dashboard":
     for lead in hosp_leads:
         parent = lead["name"].split(" — ")[0] if " — " in lead["name"] else lead["name"]
         hosp_groups.setdefault(parent, []).append(lead)
-
-    def _group_score(lst):
-        return max(l["priority_score"] for l in lst)
 
     if view_mode == "By score":
         render_items = (
@@ -624,13 +626,12 @@ elif page == "Map View":
     with col3:
         map_min_score = st.slider("Min score", 0.0, 1.0, 0.0, 0.05, key="map_score")
 
-    # Resolve category filter → org_type set
     if map_type_filter:
         allowed_types: set[str] | None = set()
         for cat in map_type_filter:
             allowed_types.update(ORG_CATEGORY_OPTIONS.get(cat, []))
     else:
-        allowed_types = None  # all
+        allowed_types = None
 
     filtered_leads = [
         l for l in leads
@@ -640,70 +641,107 @@ elif page == "Map View":
         and l.get("lat") and l.get("lon")
     ]
 
-    # Separate leads with precise coords vs estimated (distance_km == 0, not a hospital)
-    precise = [l for l in filtered_leads if l.get("distance_km", 0) > 0.01]
+    precise  = [l for l in filtered_leads if l.get("distance_km", 0) > 0.01]
     estimated = [l for l in filtered_leads if l.get("distance_km", 0) <= 0.01]
 
-    care_lat = run["lat"]
-    care_lon = run["lon"]
+    care_lat  = run["lat"]
+    care_lon  = run["lon"]
     radius_km = run["radius_km"]
 
+    # Pre-fetch contacts for all visible leads (single batch query)
+    all_visible_org_ids = [l["org_id"] for l in filtered_leads]
+    contacts_map = queries.get_contacts_for_orgs(all_visible_org_ids)
+
     st.caption(
-        f"Showing {len(precise)} leads with known locations"
-        + (f" + {len(estimated)} with estimated location" if estimated else "")
-        + f" | {len(leads) - len(filtered_leads)} hidden by filters"
+        f"Showing **{len(precise)}** leads with known locations"
+        + (f" + {len(estimated)} estimated" if estimated else "")
+        + f" · {len(leads) - len(filtered_leads)} hidden by filters"
+        + " · click a marker for full details"
     )
 
-    # ── Colour scheme: by priority score ──────────────────────────────────────
-    # Org-type to colour group for marker fill
+    # ── High-contrast colour palette ──────────────────────────────────────────
     _ORG_COLOUR: dict[str, str] = {
-        # Hospitals
-        "hospital_private": "#c0392b", "hospital_discharge": "#c0392b",
-        "hospital_frailty": "#e74c3c", "hospital_dementia": "#e74c3c",
-        "hospital_ortho": "#e67e22",   "hospital_stroke": "#e67e22",
-        "hospital_social_work": "#d35400",
-        # Primary care
-        "GP": "#2980b9", "PCN": "#3498db",
-        # Clinical
-        "hospice": "#1abc9c", "pharmacy": "#16a085",
-        # Professional
-        "solicitor": "#8e44ad", "wealth_manager": "#9b59b6",
-        "financial_adviser": "#6c3483", "estate_agent": "#a569bd",
-        # Statutory
-        "social_services": "#1f618d",
-        # Community specialist
-        "dementia_cafe": "#27ae60", "age_uk_branch": "#2ecc71",
-        "carers_group": "#52be80", "day_centre": "#82e0aa",
-        # Community general
-        "community_group": "#abebc6", "place_of_worship": "#d5f5e3",
-        "nursing_home": "#95a5a6",
+        # Hospitals — red family (darkest shades for highest priority)
+        "hospital_private":     "#7f0000",
+        "hospital_discharge":   "#b71c1c",
+        "hospital_frailty":     "#c62828",
+        "hospital_dementia":    "#d32f2f",
+        "hospital_ortho":       "#e53935",
+        "hospital_stroke":      "#ef5350",
+        "hospital_social_work": "#f44336",
+        # Primary care — strong blue
+        "GP":                   "#0d47a1",
+        "PCN":                  "#1565c0",
+        # Clinical — dark teal
+        "hospice":              "#004d40",
+        "pharmacy":             "#00695c",
+        # Professional referrers — deep purple
+        "solicitor":            "#4a148c",
+        "wealth_manager":       "#6a1b9a",
+        "financial_adviser":    "#7b1fa2",
+        "estate_agent":         "#8e24aa",
+        # Statutory — navy
+        "social_services":      "#1a237e",
+        # Community specialist — dark green
+        "dementia_cafe":        "#1b5e20",
+        "age_uk_branch":        "#2e7d32",
+        "carers_group":         "#33691e",
+        "day_centre":           "#558b2f",
+        # Community general — burnt orange (stands out from greens)
+        "community_group":      "#bf360c",
+        "place_of_worship":     "#e64a19",
+        # Care homes
+        "nursing_home":         "#4e342e",
     }
 
     def _marker_colour(lead: dict) -> str:
-        return _ORG_COLOUR.get(lead["org_type"], "#7f8c8d")
+        return _ORG_COLOUR.get(lead["org_type"], "#37474f")
 
-    def _popup_html(lead: dict) -> str:
+    def _popup_html(lead: dict, contacts: list[dict], estimated: bool = False) -> str:
         score_pct = int(lead["priority_score"] * 100)
-        label = ORG_TYPE_LABELS.get(lead["org_type"], lead["org_type"])
-        status_col = STATUS_COLOURS.get(lead["status"], "gray")
-        parts = [lead.get("address_line1"), lead.get("town"), lead.get("postcode")]
-        addr = ", ".join(p for p in parts if p) or "—"
-        phone = f"<br/>📞 {lead['phone']}" if lead.get("phone") else ""
-        dist = f"<br/>📍 {lead['distance_km']} km" if lead.get("distance_km") else ""
+        label     = ORG_TYPE_LABELS.get(lead["org_type"], lead["org_type"])
+        score_bg  = "#d4edda" if score_pct >= 70 else ("#fff3cd" if score_pct >= 40 else "#f8d7da")
+        parts     = [lead.get("address_line1"), lead.get("town"), lead.get("postcode")]
+        addr      = ", ".join(p for p in parts if p) or "—"
+        phone_str = f"<br/>📞 {lead['phone']}" if lead.get("phone") else ""
+        dist_str  = f"<br/>📍 {lead['distance_km']} km" if lead.get("distance_km") else ""
+        est_str   = "<br/><i style='color:#888;font-size:10px'>Location estimated</i>" if estimated else ""
+
+        # Contacts section
+        real_contacts = [c for c in contacts if c.get("name") or c.get("email") or c.get("phone")]
+        placeholder_roles = [c["role"] for c in contacts
+                             if not c.get("name") and not c.get("email") and c.get("role")]
+        contact_html = ""
+        if real_contacts:
+            rows = "".join(
+                f"<b>{c['name']}</b> — {c['role']}<br/>"
+                if c.get("name") else f"{c['role']}<br/>"
+                for c in real_contacts[:3]
+            )
+            contact_html = f"<hr style='margin:5px 0'/><b>Contacts:</b><br/>{rows}"
+        elif placeholder_roles:
+            contact_html = (
+                f"<hr style='margin:5px 0'/>"
+                f"<span style='color:#777;font-size:10px'>Look for: "
+                f"{' · '.join(placeholder_roles[:3])}</span>"
+            )
+
         return (
-            f"<div style='font-family:sans-serif;min-width:180px;max-width:250px'>"
+            f"<div style='font-family:sans-serif;min-width:190px;max-width:270px'>"
             f"<b style='font-size:13px'>{lead['name']}</b><br/>"
             f"<span style='color:#555;font-size:11px'>{label}</span><br/>"
-            f"<span style='background:{'#d4edda' if score_pct>=70 else ('#fff3cd' if score_pct>=40 else '#f8d7da')};"
-            f"padding:1px 5px;border-radius:3px;font-size:11px;font-weight:600'>"
-            f"Score {score_pct}</span>"
-            f"<span style='font-size:11px;margin-left:6px;color:{status_col}'>"
-            f"{lead['status'].replace('_',' ').upper()}</span>"
-            f"<br/><span style='font-size:11px;color:#666'>{addr}{phone}{dist}</span>"
+            f"<span style='background:{score_bg};padding:2px 6px;border-radius:3px;"
+            f"font-size:11px;font-weight:700'>Score {score_pct}</span> "
+            f"<span style='font-size:11px;color:#555'>{lead['status'].replace('_',' ').upper()}</span>"
+            f"<br/><span style='font-size:11px;color:#555'>{addr}{phone_str}{dist_str}</span>"
+            f"{contact_html}"
+            f"{est_str}"
+            f"<hr style='margin:5px 0'/>"
+            f"<span style='font-size:11px;color:#1a6ec7'>▼ Full details shown below map</span>"
             f"</div>"
         )
 
-    # ── Build the map ─────────────────────────────────────────────────────────
+    # ── Build folium map ──────────────────────────────────────────────────────
     m = folium.Map(
         location=[care_lat, care_lon],
         zoom_start=13,
@@ -711,26 +749,22 @@ elif page == "Map View":
     )
 
     # Radius rings
-    ring_style = dict(color="#1a3a5c", fill=True, fill_opacity=0.04, weight=1.5)
     folium.Circle(
-        location=[care_lat, care_lon],
-        radius=radius_km * 1000,
-        popup=f"{radius_km} km radius",
-        **ring_style,
+        location=[care_lat, care_lon], radius=radius_km * 1000,
+        color="#1a3a5c", fill=True, fill_opacity=0.04, weight=2,
+        tooltip=f"{radius_km} km radius",
     ).add_to(m)
     if radius_km > 2:
         folium.Circle(
-            location=[care_lat, care_lon],
-            radius=radius_km * 1000 / 2,
-            color="#1a3a5c", fill=False, weight=1, dash_array="5 5",
-            popup=f"{radius_km/2:.1f} km",
+            location=[care_lat, care_lon], radius=radius_km * 500,
+            color="#1a3a5c", fill=False, weight=1.2, dash_array="6 5",
+            tooltip=f"{radius_km/2:.1g} km",
         ).add_to(m)
     if radius_km > 4:
         folium.Circle(
-            location=[care_lat, care_lon],
-            radius=radius_km * 1000 / 3,
+            location=[care_lat, care_lon], radius=radius_km * 1000 / 3,
             color="#1a3a5c", fill=False, weight=1, dash_array="3 8",
-            popup=f"{radius_km/3:.1f} km",
+            tooltip=f"{radius_km/3:.1g} km",
         ).add_to(m)
 
     # Care home marker
@@ -743,75 +777,111 @@ elif page == "Map View":
         icon=folium.Icon(color="red", icon="home", prefix="fa"),
     ).add_to(m)
 
-    # Lead markers (precise location)
+    # Lead markers — precise location
     for lead in precise:
-        colour = _marker_colour(lead)
+        colour   = _marker_colour(lead)
+        contacts = contacts_map.get(lead["org_id"], [])
         folium.CircleMarker(
             location=[lead["lat"], lead["lon"]],
-            radius=7,
-            color=colour,
+            radius=9,
+            color="#ffffff",
+            weight=1.5,
             fill=True,
             fill_color=colour,
-            fill_opacity=0.75,
-            weight=1.5,
-            popup=folium.Popup(_popup_html(lead), max_width=260),
+            fill_opacity=0.9,
+            popup=folium.Popup(
+                _popup_html(lead, contacts, estimated=False), max_width=280
+            ),
             tooltip=lead["name"],
         ).add_to(m)
 
-    # Estimated-location leads — small grey cluster near care home with offset
+    # Estimated-location leads — clustered near care home, dashed border
     for i, lead in enumerate(estimated):
-        angle_offset = i * 0.0003
+        offset   = i * 0.0003
+        colour   = _marker_colour(lead)
+        contacts = contacts_map.get(lead["org_id"], [])
         folium.CircleMarker(
-            location=[care_lat + angle_offset, care_lon + angle_offset * 0.7],
-            radius=5,
-            color="#95a5a6",
+            location=[care_lat + offset, care_lon + offset * 0.7],
+            radius=7,
+            color=colour,
+            weight=1.5,
             fill=True,
-            fill_color=_marker_colour(lead),
-            fill_opacity=0.5,
-            weight=1,
+            fill_color=colour,
+            fill_opacity=0.55,
             popup=folium.Popup(
-                _popup_html(lead) + "<br/><i style='font-size:10px;color:#888'>Location estimated</i>",
-                max_width=260
+                _popup_html(lead, contacts, estimated=True), max_width=280
             ),
-            tooltip=f"{lead['name']} (estimated)",
-            dash_array="4 4",
+            tooltip=f"{lead['name']} (est.)",
+            dash_array="4 3",
         ).add_to(m)
 
-    # Fit map to all precise markers + care home
+    # Fit bounds
     all_lats = [care_lat] + [l["lat"] for l in precise]
     all_lons = [care_lon] + [l["lon"] for l in precise]
     if len(all_lats) > 1:
         m.fit_bounds([
-            [min(all_lats), min(all_lons)],
-            [max(all_lats), max(all_lons)],
+            [min(all_lats) - 0.002, min(all_lons) - 0.002],
+            [max(all_lats) + 0.002, max(all_lons) + 0.002],
         ])
 
     # ── Legend ────────────────────────────────────────────────────────────────
-    legend_groups = [
-        ("Hospitals",            "#c0392b"),
-        ("GP / PCN",             "#2980b9"),
-        ("Clinical",             "#1abc9c"),
-        ("Professional referrers","#8e44ad"),
-        ("Statutory",            "#1f618d"),
-        ("Community",            "#27ae60"),
-        ("Estimated location",   "#95a5a6"),
+    legend_rows = [
+        ("Hospitals",              "#b71c1c"),
+        ("GP / PCN",               "#0d47a1"),
+        ("Clinical",               "#004d40"),
+        ("Professional referrers", "#4a148c"),
+        ("Statutory",              "#1a237e"),
+        ("Community (specialist)", "#1b5e20"),
+        ("Community (general)",    "#bf360c"),
+        ("Care homes (peer)",      "#4e342e"),
+        ("Estimated location",     "#546e7a"),
     ]
     legend_html = (
-        "<div style='position:fixed;bottom:30px;left:30px;z-index:1000;"
-        "background:white;padding:10px 14px;border-radius:6px;"
-        "box-shadow:0 1px 5px rgba(0,0,0,.3);font-family:sans-serif;font-size:12px'>"
-        "<b style='font-size:13px'>Lead types</b><br/>"
+        "<div style='position:fixed;bottom:28px;left:28px;z-index:1000;"
+        "background:rgba(255,255,255,0.95);padding:10px 14px;border-radius:7px;"
+        "box-shadow:0 2px 6px rgba(0,0,0,.25);font-family:sans-serif;font-size:11px;"
+        "line-height:1.7'>"
+        "<b style='font-size:12px'>Lead types</b><br/>"
         + "".join(
             f"<span style='display:inline-block;width:11px;height:11px;"
-            f"background:{c};border-radius:50%;margin-right:5px'></span>{g}<br/>"
-            for g, c in legend_groups
+            f"background:{c};border-radius:50%;margin-right:6px;vertical-align:middle'>"
+            f"</span>{g}<br/>"
+            for g, c in legend_rows
         )
-        + "<span style='display:inline-block;font-size:16px;color:red;margin-right:5px'>🏠</span>Care home<br/>"
+        + "<span style='font-size:16px;vertical-align:middle;margin-right:4px'>📍</span>"
+          "<b>Care home</b><br/>"
         "</div>"
     )
     m.get_root().html.add_child(folium.Element(legend_html))
 
-    st_folium(m, use_container_width=True, height=620, returned_objects=[])
+    # ── Render map and detect click ───────────────────────────────────────────
+    map_result = st_folium(
+        m, use_container_width=True, height=620,
+        returned_objects=["last_object_clicked"],
+    )
+
+    # ── Full lead detail panel below map ──────────────────────────────────────
+    clicked = (map_result or {}).get("last_object_clicked")
+    if clicked:
+        clat = clicked.get("lat")
+        clng = clicked.get("lng")
+        if clat is not None and clng is not None:
+            # Match click to nearest lead (precise or estimated)
+            candidates = precise + [
+                {**l, "lat": care_lat + i * 0.0003, "lon": care_lon + i * 0.0003 * 0.7}
+                for i, l in enumerate(estimated)
+            ]
+            if candidates:
+                closest = min(
+                    candidates,
+                    key=lambda l: (l["lat"] - clat) ** 2 + (l["lon"] - clng) ** 2,
+                )
+                dist_sq = (closest["lat"] - clat) ** 2 + (closest["lon"] - clng) ** 2
+                # Only show if click is close enough to a marker (within ~200 m)
+                if dist_sq < 0.0005:
+                    st.divider()
+                    st.subheader("Selected Lead")
+                    _render_lead_card(closest, show_qual_note=True, expanded=True)
 
 
 # ── Page: Feedback / CRM ──────────────────────────────────────────────────────
