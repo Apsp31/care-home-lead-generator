@@ -1,7 +1,7 @@
 """HTML report generator using Jinja2."""
 from datetime import datetime
 from pathlib import Path
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 from db import queries
 from scoring.rules import QUALIFICATION_NOTES
 
@@ -104,7 +104,18 @@ def generate_report(run_id: int, output_path: str | None = None) -> str:
     converted = sum(1 for l in leads if l["status"] == "converted")
     conversion_rate = converted / max(contacted, 1) if contacted else 0.0
 
-    env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)))
+    def _safe_url(value: str) -> str:
+        """Allow only http/https URLs; return empty string for anything else."""
+        stripped = (value or "").strip().lower()
+        if stripped.startswith("http://") or stripped.startswith("https://"):
+            return value.strip()
+        return ""
+
+    env = Environment(
+        loader=FileSystemLoader(str(TEMPLATE_DIR)),
+        autoescape=select_autoescape(["html"]),
+    )
+    env.filters["safe_url"] = _safe_url
     template = env.get_template("report.html")
     html = template.render(
         run=run,
@@ -119,6 +130,11 @@ def generate_report(run_id: int, output_path: str | None = None) -> str:
     )
 
     if output_path:
-        Path(output_path).write_text(html, encoding="utf-8")
+        _allowed = Path(__file__).parent / "output"
+        _allowed.mkdir(parents=True, exist_ok=True)
+        _resolved = (_allowed / Path(output_path).name).resolve()
+        if not str(_resolved).startswith(str(_allowed.resolve())):
+            raise ValueError(f"output_path outside allowed directory: {output_path}")
+        _resolved.write_text(html, encoding="utf-8")
 
     return html

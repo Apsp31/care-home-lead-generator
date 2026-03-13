@@ -173,7 +173,7 @@
           {% if lead.distance_km is not none %}{{ lead.distance_km }} km away{% endif %}
           {% if lead.phone %} &bull; {{ lead.phone }}{% endif %}
           {% if lead.email %} &bull; {{ lead.email }}{% endif %}
-          {% if lead.website %} &bull; <a href="{{ lead.website }}">website</a>{% endif %}
+          {% set safe_site = lead.website | safe_url %}{% if safe_site %} &bull; <a href="{{ safe_site }}">website</a>{% endif %}
         </div>
 
         {% set li_q = (lead.name ~ " " ~ (lead.town or "")) | urlencode %}

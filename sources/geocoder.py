@@ -1,10 +1,15 @@
 """Postcode geocoding via postcodes.io — no auth required."""
+import re
 import requests
+
+_POSTCODE_RE = re.compile(r'^[A-Z]{1,2}[0-9][A-Z0-9]?[0-9][A-Z]{2}$')
 
 
 def postcode_to_latlon(postcode: str) -> tuple[float, float]:
     """Returns (lat, lon) for a UK postcode. Raises ValueError if not found."""
     postcode_clean = postcode.replace(" ", "").upper()
+    if not _POSTCODE_RE.match(postcode_clean):
+        raise ValueError(f"Invalid UK postcode: {postcode!r}")
     resp = requests.get(f"https://api.postcodes.io/postcodes/{postcode_clean}", timeout=10)
     if resp.status_code != 200:
         raise ValueError(f"Postcode not found: {postcode}")

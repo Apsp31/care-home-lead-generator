@@ -1,5 +1,5 @@
 """Care Home Lead Generator — Streamlit app."""
-import base64
+import html as _html
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -119,6 +119,13 @@ def _social_links(name: str, town: str) -> str:
     return f"[LinkedIn]({li}) · [Facebook]({fb})"
 
 
+def _safe_url(value: str) -> str:
+    stripped = (value or "").strip().lower()
+    if stripped.startswith("http://") or stripped.startswith("https://"):
+        return value.strip()
+    return ""
+
+
 def _render_contacts(contacts: list[dict]):
     """Named contacts in full; collapse pure-placeholder rows to a hint line."""
     real = [c for c in contacts
@@ -128,19 +135,19 @@ def _render_contacts(contacts: list[dict]):
 
     for c in real:
         if c.get("name"):
-            st.markdown(f"- **{c['name']}** — {c['role']}")
+            st.markdown(f"- **{_html.escape(c['name'])}** — {_html.escape(c['role'])}")
         else:
-            st.markdown(f"- _{c['role']}_")
+            st.markdown(f"- _{_html.escape(c['role'])}_")
         if c.get("email"):
-            st.markdown(f"  - Email: {c['email']}")
+            st.markdown(f"  - Email: {_html.escape(c['email'])}")
         if c.get("phone"):
-            st.markdown(f"  - Phone: {c['phone']}")
+            st.markdown(f"  - Phone: {_html.escape(c['phone'])}")
         note = c.get("source_notes", "")
         if note and note not in ("Role placeholder",):
-            st.caption(f"  {note}")
+            st.caption(f"  {_html.escape(note)}")
 
     if placeholders:
-        roles = " · ".join(c["role"] for c in placeholders)
+        roles = " · ".join(_html.escape(c["role"]) for c in placeholders)
         prefix = "Also look for:" if real else "If no named contact found, look for:"
         st.caption(f"{prefix} {roles}")
 
@@ -168,14 +175,15 @@ def _render_lead_card(lead: dict, show_qual_note: bool = True, expanded: bool = 
         with c1:
             parts = [lead.get("address_line1"), lead.get("address_line2"),
                      lead.get("town"), lead.get("postcode")]
-            addr = ", ".join(p for p in parts if p)
+            addr = _html.escape(", ".join(p for p in parts if p))
             st.markdown(f"**Address:** {addr or '—'}")
             if lead.get("phone"):
-                st.markdown(f"**Phone:** {lead['phone']}")
+                st.markdown(f"**Phone:** {_html.escape(lead['phone'])}")
             if lead.get("email"):
-                st.markdown(f"**Email:** {lead['email']}")
-            if lead.get("website"):
-                st.markdown(f"**Website:** {lead['website']}")
+                st.markdown(f"**Email:** {_html.escape(lead['email'])}")
+            site = _safe_url(lead.get("website", ""))
+            if site:
+                st.markdown(f"**Website:** [{site}]({site})")
             st.markdown(f"**Distance:** {lead.get('distance_km')} km")
             st.markdown(f"**Find online:** {_social_links(lead['name'], lead.get('town', ''))}")
             breakdown = json.loads(lead.get("score_breakdown") or "{}")
@@ -192,7 +200,7 @@ def _render_lead_card(lead: dict, show_qual_note: bool = True, expanded: bool = 
             _render_contacts(contacts)
 
         if lead.get("notes"):
-            st.markdown(f"**Notes:** {lead['notes']}")
+            st.markdown(f"**Notes:** {_html.escape(lead['notes'])}")
 
 
 def _render_hospital_group(parent_name: str, depts: list, show_dept_qual: bool = True):
@@ -210,13 +218,14 @@ def _render_hospital_group(parent_name: str, depts: list, show_dept_qual: bool =
         addr = ", ".join(p for p in parts if p)
         c1, c2 = st.columns(2)
         with c1:
-            st.markdown(f"**Address:** {addr or '—'}")
+            st.markdown(f"**Address:** {_html.escape(addr) or '—'}")
             if d.get("phone"):
-                st.markdown(f"**Switchboard:** {d['phone']}")
+                st.markdown(f"**Switchboard:** {_html.escape(d['phone'])}")
             if d.get("email"):
-                st.markdown(f"**Email:** {d['email']}")
-            if d.get("website"):
-                st.markdown(f"**Website:** {d['website']}")
+                st.markdown(f"**Email:** {_html.escape(d['email'])}")
+            site = _safe_url(d.get("website", ""))
+            if site:
+                st.markdown(f"**Website:** [{site}]({site})")
             st.markdown(f"**Distance:** {d.get('distance_km')} km")
             st.markdown(f"**Find online:** {_social_links(parent_name, d.get('town', ''))}")
         with c2:
@@ -238,7 +247,7 @@ def _render_hospital_group(parent_name: str, depts: list, show_dept_qual: bool =
                         st.info(qual)
                 _render_contacts(dept_contacts)
                 if dept.get("notes"):
-                    st.markdown(f"**Notes:** {dept['notes']}")
+                    st.markdown(f"**Notes:** {_html.escape(dept['notes'])}")
 
 
 def _group_score(lst: list) -> float:
@@ -487,9 +496,12 @@ elif page == "Lead Dashboard":
     with col_a:
         if st.button("Generate HTML Report", type="primary"):
             html = generate_report(run_id)
-            b64 = base64.b64encode(html.encode()).decode()
-            href = f'<a href="data:text/html;base64,{b64}" download="leads_{run_id}.html" target="_blank">Click to download report</a>'
-            st.markdown(href, unsafe_allow_html=True)
+            st.download_button(
+                "Download report",
+                data=html.encode(),
+                file_name=f"leads_{run_id}.html",
+                mime="text/html",
+            )
     with col_b:
         if st.button("Re-score (apply feedback)"):
             recalculate_scores_for_run(run_id, run["radius_km"])
@@ -702,10 +714,12 @@ elif page == "Map View":
         label     = ORG_TYPE_LABELS.get(lead["org_type"], lead["org_type"])
         score_bg  = "#d4edda" if score_pct >= 70 else ("#fff3cd" if score_pct >= 40 else "#f8d7da")
         parts     = [lead.get("address_line1"), lead.get("town"), lead.get("postcode")]
-        addr      = ", ".join(p for p in parts if p) or "—"
-        phone_str = f"<br/>📞 {lead['phone']}" if lead.get("phone") else ""
+        addr      = _html.escape(", ".join(p for p in parts if p) or "—")
+        phone_str = f"<br/>📞 {_html.escape(lead['phone'])}" if lead.get("phone") else ""
         dist_str  = f"<br/>📍 {lead['distance_km']} km" if lead.get("distance_km") else ""
         est_str   = "<br/><i style='color:#888;font-size:10px'>Location estimated</i>" if estimated else ""
+        name_e    = _html.escape(lead["name"])
+        status_e  = _html.escape(lead["status"].replace("_", " ").upper())
 
         # Contacts section
         real_contacts = [c for c in contacts if c.get("name") or c.get("email") or c.get("phone")]
@@ -714,25 +728,25 @@ elif page == "Map View":
         contact_html = ""
         if real_contacts:
             rows = "".join(
-                f"<b>{c['name']}</b> — {c['role']}<br/>"
-                if c.get("name") else f"{c['role']}<br/>"
+                f"<b>{_html.escape(c['name'])}</b> — {_html.escape(c['role'])}<br/>"
+                if c.get("name") else f"{_html.escape(c['role'])}<br/>"
                 for c in real_contacts[:3]
             )
             contact_html = f"<hr style='margin:5px 0'/><b>Contacts:</b><br/>{rows}"
         elif placeholder_roles:
+            roles_e = " · ".join(_html.escape(r) for r in placeholder_roles[:3])
             contact_html = (
                 f"<hr style='margin:5px 0'/>"
-                f"<span style='color:#777;font-size:10px'>Look for: "
-                f"{' · '.join(placeholder_roles[:3])}</span>"
+                f"<span style='color:#777;font-size:10px'>Look for: {roles_e}</span>"
             )
 
         return (
             f"<div style='font-family:sans-serif;min-width:190px;max-width:270px'>"
-            f"<b style='font-size:13px'>{lead['name']}</b><br/>"
+            f"<b style='font-size:13px'>{name_e}</b><br/>"
             f"<span style='color:#555;font-size:11px'>{label}</span><br/>"
             f"<span style='background:{score_bg};padding:2px 6px;border-radius:3px;"
             f"font-size:11px;font-weight:700'>Score {score_pct}</span> "
-            f"<span style='font-size:11px;color:#555'>{lead['status'].replace('_',' ').upper()}</span>"
+            f"<span style='font-size:11px;color:#555'>{status_e}</span>"
             f"<br/><span style='font-size:11px;color:#555'>{addr}{phone_str}{dist_str}</span>"
             f"{contact_html}"
             f"{est_str}"
@@ -925,9 +939,9 @@ elif page == "Feedback / CRM":
                 st.markdown("**Key contacts:**")
                 for c in contacts:
                     if c.get("name"):
-                        st.markdown(f"- **{c['name']}** — {c['role']}")
+                        st.markdown(f"- **{_html.escape(c['name'])}** — {_html.escape(c['role'])}")
                     else:
-                        st.markdown(f"- _{c['role']}_")
+                        st.markdown(f"- _{_html.escape(c['role'])}_")
                 st.markdown(f"**Priority score:** {int(lead['priority_score']*100)}")
                 qual = QUALIFICATION_NOTES.get(lead["org_type"], "")
                 if qual:
