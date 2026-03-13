@@ -2,7 +2,24 @@
 import time
 import requests
 from .base import DataSource
-from .geocoder import haversine_km
+from .geocoder import haversine_km, postcode_to_latlon
+
+
+def _latlon_from_element(el: dict, tags: dict, fallback_lat: float,
+                          fallback_lon: float) -> tuple[float, float, bool]:
+    """Return (lat, lon, is_precise). Falls back to postcode geocoding, then care home coords."""
+    lat = el.get("lat") or el.get("center", {}).get("lat")
+    lon = el.get("lon") or el.get("center", {}).get("lon")
+    if lat is not None and lon is not None:
+        return lat, lon, True
+    pc = tags.get("addr:postcode", "")
+    if pc:
+        try:
+            lat, lon = postcode_to_latlon(pc)
+            return lat, lon, True
+        except Exception:
+            pass
+    return fallback_lat, fallback_lon, False
 
 OVERPASS_MIRRORS = [
     "https://overpass-api.de/api/interpreter",
@@ -159,10 +176,6 @@ class OverpassSource(DataSource):
                 key = org["source_id"]
                 if key not in seen_ids:
                     seen_ids.add(key)
-                    dist = haversine_km(lat, lon,
-                                        org.get("lat", lat),
-                                        org.get("lon", lon))
-                    org["distance_km"] = round(dist, 2)
                     results.append(org)
         except Exception as e:
             print(f"[overpass] Batch query error: {e}")
@@ -189,8 +202,7 @@ class OverpassSource(DataSource):
             if not name:
                 continue
 
-            el_lat = el.get("lat") or el.get("center", {}).get("lat")
-            el_lon = el.get("lon") or el.get("center", {}).get("lon")
+            el_lat, el_lon, _ = _latlon_from_element(el, tags, lat, lon)
             if el_lat is None:
                 continue
 
@@ -257,8 +269,8 @@ class OverpassSource(DataSource):
                 if not name:
                     continue
 
-                el_lat = el.get("lat") or el.get("center", {}).get("lat")
-                el_lon = el.get("lon") or el.get("center", {}).get("lon")
+                el_lat, el_lon, precise = _latlon_from_element(el, tags, lat, lon)
+                dist = round(haversine_km(lat, lon, el_lat, el_lon), 2) if precise else 0.0
 
                 results.append({
                     "name": name,
@@ -271,7 +283,7 @@ class OverpassSource(DataSource):
                     "postcode": tags.get("addr:postcode", ""),
                     "lat": el_lat,
                     "lon": el_lon,
-                    "distance_km": 0.0,
+                    "distance_km": dist,
                     "phone": tags.get("phone", tags.get("contact:phone", "")),
                     "email": tags.get("email", tags.get("contact:email", "")),
                     "website": tags.get("website", tags.get("contact:website", "")),
