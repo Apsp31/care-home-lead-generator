@@ -60,11 +60,44 @@ STATUS_COLOURS = {
     "not_converted": "red",
     "ignored": "gray",
 }
+STATUS_EMOJI = {
+    "contacted":     "✅ ",
+    "converted":     "🎉 ",
+    "not_converted": "❌ ",
+    "ignored":       "🚫 ",
+    "new":           "",
+}
 
 
 def status_badge(status: str) -> str:
     colour = STATUS_COLOURS.get(status, "gray")
     return f":{colour}[{status.replace('_', ' ').upper()}]"
+
+
+def _quick_status_buttons(lead_id: int, current_status: str, key_prefix: str = ""):
+    c1, c2, _ = st.columns([1, 1, 4])
+    with c1:
+        if current_status not in ("contacted", "converted"):
+            if st.button("✓ Contacted", key=f"{key_prefix}contact_{lead_id}",
+                         use_container_width=True, type="primary"):
+                queries.update_lead_status(lead_id, "contacted")
+                st.rerun()
+        else:
+            if st.button("↩ Unmark", key=f"{key_prefix}contact_{lead_id}",
+                         use_container_width=True):
+                queries.update_lead_status(lead_id, "new")
+                st.rerun()
+    with c2:
+        if current_status != "ignored":
+            if st.button("✗ Ignore", key=f"{key_prefix}ignore_{lead_id}",
+                         use_container_width=True):
+                queries.update_lead_status(lead_id, "ignored")
+                st.rerun()
+        else:
+            if st.button("↩ Restore", key=f"{key_prefix}ignore_{lead_id}",
+                         use_container_width=True):
+                queries.update_lead_status(lead_id, "new")
+                st.rerun()
 
 
 def run_sources(lat, lon, radius_km, selected_sources, hospital_dept_types=None):
@@ -160,8 +193,9 @@ def _render_lead_card(lead: dict, show_qual_note: bool = True, expanded: bool = 
     sc = "green" if score >= 0.7 else ("orange" if score >= 0.4 else "red")
     contacts = queries.get_contacts_for_org(lead["org_id"])
 
+    emoji = STATUS_EMOJI.get(lead["status"], "")
     with st.expander(
-        f"**{lead['name']}** | :{sc}[{int(score*100)}] | "
+        f"{emoji}**{lead['name']}** | :{sc}[{int(score*100)}] | "
         f"{ORG_TYPE_LABELS.get(lead['org_type'], lead['org_type'])} | "
         f"{lead['distance_km'] or '?'} km | {status_badge(lead['status'])}",
         expanded=expanded,
@@ -202,6 +236,9 @@ def _render_lead_card(lead: dict, show_qual_note: bool = True, expanded: bool = 
         if lead.get("notes"):
             st.markdown(f"**Notes:** {_html.escape(lead['notes'])}")
 
+        st.divider()
+        _quick_status_buttons(lead["id"], lead["status"], key_prefix=f"lc_{lead['id']}_")
+
 
 def _render_hospital_group(parent_name: str, depts: list, show_dept_qual: bool = True):
     best = max(depts, key=lambda x: x["priority_score"])
@@ -237,8 +274,9 @@ def _render_hospital_group(parent_name: str, depts: list, show_dept_qual: bool =
             dept_contacts = queries.get_contacts_for_org(dept["org_id"])
             score = dept["priority_score"]
             sc2 = "green" if score >= 0.7 else ("orange" if score >= 0.4 else "red")
+            demoji = STATUS_EMOJI.get(dept["status"], "")
             with st.expander(
-                f"**{dept_label}** | :{sc2}[{int(score*100)}] | {status_badge(dept['status'])}",
+                f"{demoji}**{dept_label}** | :{sc2}[{int(score*100)}] | {status_badge(dept['status'])}",
                 expanded=False,
             ):
                 if show_dept_qual:
@@ -248,6 +286,8 @@ def _render_hospital_group(parent_name: str, depts: list, show_dept_qual: bool =
                 _render_contacts(dept_contacts)
                 if dept.get("notes"):
                     st.markdown(f"**Notes:** {_html.escape(dept['notes'])}")
+                st.divider()
+                _quick_status_buttons(dept["id"], dept["status"], key_prefix=f"hd_{dept['id']}_")
 
 
 def _group_score(lst: list) -> float:
@@ -477,7 +517,7 @@ elif page == "Lead Dashboard":
         status_filter = st.multiselect(
             "Status",
             options=STATUS_OPTIONS,
-            default=[],
+            default=["new", "contacted", "converted", "not_converted"],
         )
     with col3:
         min_score = st.slider("Min priority score", 0.0, 1.0, 0.0, 0.05)
@@ -631,9 +671,8 @@ elif page == "Map View":
         map_status_filter = st.multiselect(
             "Status",
             options=STATUS_OPTIONS,
-            default=[],
+            default=["new", "contacted", "converted", "not_converted"],
             key="map_status_filter",
-            placeholder="All statuses",
         )
     with col3:
         map_min_score = st.slider("Min score", 0.0, 1.0, 0.0, 0.05, key="map_score")
@@ -706,8 +745,18 @@ elif page == "Map View":
         "nursing_home":         "#4e342e",
     }
 
-    def _marker_colour(lead: dict) -> str:
-        return _ORG_COLOUR.get(lead["org_type"], "#37474f")
+    def _marker_style(lead: dict) -> dict:
+        status = lead.get("status", "new")
+        base = _ORG_COLOUR.get(lead["org_type"], "#37474f")
+        if status == "ignored":
+            return dict(fill_color="#9e9e9e", color="#bdbdbd", weight=1,
+                        fill_opacity=0.35, radius=7, dash_array="4 3")
+        if status in ("contacted", "converted"):
+            fill = "#2e7d32" if status == "converted" else base
+            return dict(fill_color=fill, color="#ffffff", weight=3,
+                        fill_opacity=0.95, radius=11)
+        return dict(fill_color=base, color="#ffffff", weight=1.5,
+                    fill_opacity=0.9, radius=9)
 
     def _popup_html(lead: dict, contacts: list[dict], estimated: bool = False) -> str:
         score_pct = int(lead["priority_score"] * 100)
@@ -719,7 +768,13 @@ elif page == "Map View":
         dist_str  = f"<br/>📍 {lead['distance_km']} km" if lead.get("distance_km") else ""
         est_str   = "<br/><i style='color:#888;font-size:10px'>Location estimated</i>" if estimated else ""
         name_e    = _html.escape(lead["name"])
-        status_e  = _html.escape(lead["status"].replace("_", " ").upper())
+        _status_colours = {"contacted": ("#e8f5e9","#2e7d32"), "converted": ("#c8e6c9","#1b5e20"),
+                           "ignored": ("#f5f5f5","#9e9e9e"), "not_converted": ("#ffebee","#c62828"),
+                           "new": ("#e3f2fd","#1565c0")}
+        _sbg, _sfg = _status_colours.get(lead["status"], ("#f5f5f5","#555"))
+        status_e  = (f"<span style='background:{_sbg};color:{_sfg};padding:1px 5px;"
+                     f"border-radius:3px;font-size:10px;font-weight:700'>"
+                     f"{_html.escape(lead['status'].replace('_',' ').upper())}</span>")
 
         # Contacts section
         real_contacts = [c for c in contacts if c.get("name") or c.get("email") or c.get("phone")]
@@ -746,7 +801,7 @@ elif page == "Map View":
             f"<span style='color:#555;font-size:11px'>{label}</span><br/>"
             f"<span style='background:{score_bg};padding:2px 6px;border-radius:3px;"
             f"font-size:11px;font-weight:700'>Score {score_pct}</span> "
-            f"<span style='font-size:11px;color:#555'>{status_e}</span>"
+            f"{status_e}"
             f"<br/><span style='font-size:11px;color:#555'>{addr}{phone_str}{dist_str}</span>"
             f"{contact_html}"
             f"{est_str}"
@@ -793,40 +848,31 @@ elif page == "Map View":
 
     # Lead markers — precise location
     for lead in precise:
-        colour   = _marker_colour(lead)
+        style    = _marker_style(lead)
         contacts = contacts_map.get(lead["org_id"], [])
         folium.CircleMarker(
             location=[lead["lat"], lead["lon"]],
-            radius=9,
-            color="#ffffff",
-            weight=1.5,
             fill=True,
-            fill_color=colour,
-            fill_opacity=0.9,
-            popup=folium.Popup(
-                _popup_html(lead, contacts, estimated=False), max_width=280
-            ),
+            popup=folium.Popup(_popup_html(lead, contacts, estimated=False), max_width=280),
             tooltip=lead["name"],
+            **style,
         ).add_to(m)
 
     # Estimated-location leads — clustered near care home, dashed border
     for i, lead in enumerate(estimated):
         offset   = i * 0.0003
-        colour   = _marker_colour(lead)
+        style    = _marker_style(lead)
         contacts = contacts_map.get(lead["org_id"], [])
+        # Merge estimated dash styling (always dashed) with status style
+        est_style = {**style, "radius": max(style["radius"] - 2, 5),
+                     "fill_opacity": style["fill_opacity"] * 0.65,
+                     "dash_array": "4 3"}
         folium.CircleMarker(
             location=[care_lat + offset, care_lon + offset * 0.7],
-            radius=7,
-            color=colour,
-            weight=1.5,
             fill=True,
-            fill_color=colour,
-            fill_opacity=0.55,
-            popup=folium.Popup(
-                _popup_html(lead, contacts, estimated=True), max_width=280
-            ),
+            popup=folium.Popup(_popup_html(lead, contacts, estimated=True), max_width=280),
             tooltip=f"{lead['name']} (est.)",
-            dash_array="4 3",
+            **est_style,
         ).add_to(m)
 
     # Fit bounds
@@ -839,7 +885,7 @@ elif page == "Map View":
         ])
 
     # ── Legend ────────────────────────────────────────────────────────────────
-    legend_rows = [
+    type_legend_rows = [
         ("Hospitals",              "#b71c1c"),
         ("GP / PCN",               "#0d47a1"),
         ("Clinical",               "#004d40"),
@@ -850,21 +896,40 @@ elif page == "Map View":
         ("Care homes (peer)",      "#4e342e"),
         ("Estimated location",     "#546e7a"),
     ]
+    status_legend_rows = [
+        ("New",         "#555", "#ffffff", "1.5px", "9px", ""),
+        ("Contacted",   "#555", "#ffffff", "3px",   "11px", ""),
+        ("Converted",   "#2e7d32", "#ffffff", "3px", "11px", ""),
+        ("Ignored",     "#9e9e9e", "#bdbdbd", "1px", "7px",  "4 3"),
+    ]
+
+    def _status_dot(fill: str, border: str, bw: str, sz: str, dash: str) -> str:
+        outline = f"border:{bw} dashed {border}" if dash else f"border:{bw} solid {border}"
+        return (f"<span style='display:inline-block;width:{sz};height:{sz};"
+                f"background:{fill};border-radius:50%;{outline};"
+                f"margin-right:6px;vertical-align:middle'></span>")
+
     legend_html = (
         "<div style='position:fixed;bottom:28px;left:28px;z-index:1000;"
         "background:rgba(255,255,255,0.95);padding:10px 14px;border-radius:7px;"
         "box-shadow:0 2px 6px rgba(0,0,0,.25);font-family:sans-serif;font-size:11px;"
-        "line-height:1.7'>"
+        "line-height:1.8'>"
         "<b style='font-size:12px'>Lead types</b><br/>"
         + "".join(
             f"<span style='display:inline-block;width:11px;height:11px;"
             f"background:{c};border-radius:50%;margin-right:6px;vertical-align:middle'>"
             f"</span>{g}<br/>"
-            for g, c in legend_rows
+            for g, c in type_legend_rows
         )
         + "<span style='font-size:16px;vertical-align:middle;margin-right:4px'>📍</span>"
           "<b>Care home</b><br/>"
-        "</div>"
+        + "<hr style='margin:5px 0;border:none;border-top:1px solid #ddd'/>"
+          "<b style='font-size:12px'>Status</b><br/>"
+        + "".join(
+            f"{_status_dot(fill, border, bw, sz, dash)}{label}<br/>"
+            for label, fill, border, bw, sz, dash in status_legend_rows
+        )
+        + "</div>"
     )
     m.get_root().html.add_child(folium.Element(legend_html))
 
