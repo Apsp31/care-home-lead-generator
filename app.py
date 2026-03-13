@@ -22,6 +22,7 @@ from sources.companies_house import CompaniesHouseSource
 from sources.web_search import WebSearchSource
 from sources.solla import SollaSource
 from sources.enrichment import enrich_contacts, ENRICH_ROLES
+from sources.hospital_enrichment import enrich_hospital_orgs
 from scoring.engine import score_org, get_feedback_weights, recalculate_scores_for_run
 from scoring.rules import QUALIFICATION_NOTES
 from reports.html_report import generate_report, ORG_TYPE_LABELS, TYPE_ORDER
@@ -506,7 +507,7 @@ if page == "New Search":
 
             st.markdown("**Contact enrichment**")
             enrich_enabled = st.checkbox(
-                "Search LinkedIn for named contacts on orgs without them  *(adds ~2–3 min)*",
+                "Search LinkedIn / trust websites / NHS Jobs for named contacts  *(adds ~3–5 min)*",
                 value=False,
             )
 
@@ -564,10 +565,19 @@ if page == "New Search":
             ):
                 orgs = [o for o in orgs if o.get("org_type") in selected_org_types_set]
 
+            # Hospital PALS enrichment — always run if any hospital orgs found
+            has_hospitals = any(o.get("org_type", "").startswith("hospital_") for o in orgs)
+            if has_hospitals:
+                progress.progress(45, text="Finding PALS contacts for hospitals...")
+                orgs = enrich_hospital_orgs(orgs, full_enrichment=False)
+
             if enrich_enabled and orgs:
                 enrich_types = set(selected_org_types_set) & set(ENRICH_ROLES)
                 progress.progress(50, text=f"Enriching contacts via LinkedIn ({len(enrich_types)} org types)...")
                 orgs = enrich_contacts(orgs, enrich_types if enrich_types else None)
+                if has_hospitals:
+                    progress.progress(60, text="Enriching hospital dept contacts from trust websites & NHS Jobs...")
+                    orgs = enrich_hospital_orgs(orgs, full_enrichment=True)
 
             progress.progress(70, text="Scoring and saving leads...")
             save_orgs_to_db(orgs, run_id, radius, feedback_weights)
