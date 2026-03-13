@@ -39,7 +39,10 @@ ORG_TYPE_LABELS = {
     # Community — general
     "community_group":      "Community Groups",
     "place_of_worship":     "Places of Worship",
+    # Other care sector
     "nursing_home":         "Other Care & Nursing Homes",
+    "domiciliary_care":     "Domiciliary Care Agencies",
+    "care_referral":        "Care Placement Advisers & Referral Agencies",
 }
 
 # Display order — highest wealth indicator / referral priority first

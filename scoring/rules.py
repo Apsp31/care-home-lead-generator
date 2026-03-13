@@ -33,8 +33,10 @@ ORG_TYPE_BASE_SCORES: dict[str, float] = {
     # Community — general
     "community_group":      0.35,
     "place_of_worship":     0.25,
-    # Other
+    # Other care sector
     "nursing_home":         0.30,
+    "domiciliary_care":     0.70,  # clients receiving home care; may transition to residential
+    "care_referral":        0.85,  # placement advisers whose job is matching people to care homes
 }
 
 # Wealth indicator: likelihood that this org's clients can self-fund ~£2k/week
@@ -64,6 +66,8 @@ WEALTH_INDICATOR_SCORES: dict[str, float] = {
     "community_group":      0.20,
     "place_of_worship":     0.15,
     "nursing_home":         0.25,
+    "domiciliary_care":     0.55,  # some self-funders; many LA-funded but declining clients
+    "care_referral":        0.80,  # clients actively seeking placement; often self-funders
 }
 
 # Displayed in the report and dashboard to explain relevance
@@ -146,6 +150,14 @@ QUALIFICATION_NOTES: dict[str, str] = {
     "nursing_home":
         "Other Care Home — peer networking opportunity; cross-referrals when at capacity or for specialist "
         "dementia / nursing needs outside their registration.",
+    "domiciliary_care":
+        "Domiciliary Care Agency — provides care at home to elderly clients who may deteriorate and require "
+        "residential placement. Care managers observe decline daily and are trusted by families. "
+        "A relationship here generates referrals at the point home care is no longer sufficient.",
+    "care_referral":
+        "Care Placement Adviser / Referral Agency — their specific role is matching people to care homes. "
+        "Clients are actively seeking placement, often self-funding, and have an immediate need. "
+        "These are among the highest-value referral relationships available.",
 }
 
 # Component weights — must sum to 1.0

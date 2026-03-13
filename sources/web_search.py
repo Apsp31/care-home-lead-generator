@@ -46,11 +46,13 @@ _NEWS_DOMAINS = {
 
 # Required keywords per org type — the org name/URL must contain at least one
 _TYPE_KEYWORDS: dict[str, set[str]] = {
-    "dementia_cafe":  {"dementia", "memory", "alzheimer", "cognitive"},
-    "age_uk_branch":  {"age uk", "age concern", "ageuk", "ageconcern"},
-    "carers_group":   {"carer", "caring", "carers", "family support"},
-    "day_centre":     {"day centre", "day center", "daycentre", "day service"},
-    "community_group":{"community", "befriend", "lunch club", "social club"},
+    "dementia_cafe":    {"dementia", "memory", "alzheimer", "cognitive"},
+    "age_uk_branch":    {"age uk", "age concern", "ageuk", "ageconcern"},
+    "carers_group":     {"carer", "caring", "carers", "family support"},
+    "day_centre":       {"day centre", "day center", "daycentre", "day service"},
+    "community_group":  {"community", "befriend", "lunch club", "social club"},
+    "domiciliary_care": {"domiciliary", "home care", "homecare", "care at home"},
+    "care_referral":    {"placement", "referral", "care adviser", "care finder", "navigator"},
 }
 
 # URL path patterns that indicate an article/news page rather than an org homepage
@@ -82,6 +84,13 @@ COMMUNITY_SEARCHES = [
     ("older people day centre",          "day_centre"),
     ("senior lunch club",                "community_group"),
     ("befriending service older people", "community_group"),
+    ("home care agency elderly",         "domiciliary_care"),
+    ("domiciliary care provider",        "domiciliary_care"),
+    ("care at home agency",              "domiciliary_care"),
+    ("care home placement agency",       "care_referral"),
+    ("care placement adviser",           "care_referral"),
+    ("care home finder",                 "care_referral"),
+    ("care navigator elderly",           "care_referral"),
 ]
 
 FACEBOOK_SEARCHES = [
@@ -109,6 +118,9 @@ LINKEDIN_AREA_SEARCHES = [
     ("dementia cafe coordinator",                "dementia_cafe"),
     ("age uk manager",                           "age_uk_branch"),
     ("carers support coordinator",               "carers_group"),
+    ("home care manager domiciliary",            "domiciliary_care"),
+    ("care placement coordinator",               "care_referral"),
+    ("care adviser care home placement",         "care_referral"),
 ]
 
 LINKEDIN_COMPANY_SEARCHES = [
@@ -138,6 +150,18 @@ CONTACTS_BY_TYPE = {
     "day_centre": [
         {"name": "", "role": "Centre Manager",
          "source_notes": "Observes clients' decline; trusted by families for 'next step' advice"},
+    ],
+    "domiciliary_care": [
+        {"name": "", "role": "Registered Manager",
+         "source_notes": "CQC-registered manager; observes client decline and trusted by families"},
+        {"name": "", "role": "Care Coordinator",
+         "source_notes": "Day-to-day contact; often first to identify when home care is no longer enough"},
+    ],
+    "care_referral": [
+        {"name": "", "role": "Care Placement Adviser",
+         "source_notes": "Their job is matching people to care homes — highest-value referral contact"},
+        {"name": "", "role": "Care Navigator",
+         "source_notes": "Guides families through care options; direct route to placement referrals"},
     ],
 }
 
