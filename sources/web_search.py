@@ -146,6 +146,13 @@ COMMUNITY_SEARCHES = [
     ("Rotary club",                      "senior_club"),
     ("Probus club retired",              "senior_club"),
     ("bowls club seniors",               "senior_club"),
+    # Voluntary sector charities — care-adjacent
+    ("carers trust local",               "carers_group"),
+    ("Alzheimer's Society local group",  "dementia_cafe"),
+    ("Parkinson's UK local group",       "community_group"),
+    ("Independent Age local",            "age_uk_branch"),
+    ("Royal Voluntary Service",          "community_group"),
+    ("WRVS volunteers elderly",          "community_group"),
 ]
 
 FACEBOOK_SEARCHES = [

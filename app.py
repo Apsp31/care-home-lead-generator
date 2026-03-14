@@ -22,7 +22,9 @@ from sources.overpass import OverpassSource
 from sources.companies_house import CompaniesHouseSource
 from sources.web_search import WebSearchSource
 from sources.solla import SollaSource
-from sources.enrichment import enrich_contacts, ENRICH_ROLES
+from sources.cqc import CQCSource
+from sources.google_places import GooglePlacesSource
+from sources.enrichment import enrich_contacts, enrich_website_contacts, ENRICH_ROLES
 from sources.hospital_enrichment import enrich_hospital_orgs
 from scoring.engine import score_org, get_feedback_weights, recalculate_scores_for_run
 from scoring.rules import QUALIFICATION_NOTES
@@ -167,7 +169,8 @@ with st.sidebar:
     )
     st.divider()
     st.caption("Set COMPANIES_HOUSE_API_KEY in .env to enable Companies House data.")
-    st.caption("SOLLA source searches LinkedIn & web for care fees IFA specialists.")
+    st.caption("Set GOOGLE_PLACES_API_KEY in .env to enable Google Places data.")
+    st.caption("CQC and SOLLA sources require no API key.")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -235,6 +238,10 @@ def run_sources(lat, lon, radius_km, selected_sources, hospital_dept_types=None)
         sources.append(WebSearchSource())
     if "SOLLA (care fees IFA specialists)" in selected_sources:
         sources.append(SollaSource())
+    if "CQC (homecare agencies, community care)" in selected_sources:
+        sources.append(CQCSource())
+    if "Google Places (local businesses — requires API key)" in selected_sources:
+        sources.append(GooglePlacesSource())
 
     all_orgs = []
     errors = []
@@ -274,6 +281,10 @@ def _do_search(job: dict, lat: float, lon: float, radius: float,
             job["progress"] = 45
             job["message"] = "Finding PALS contacts for hospitals..."
             orgs = enrich_hospital_orgs(orgs, full_enrichment=False)
+
+        job["progress"] = 48
+        job["message"] = "Scraping websites for phone/email..."
+        orgs = enrich_website_contacts(orgs)
 
         if enrich_enabled and orgs:
             enrich_types = org_types_set & set(ENRICH_ROLES)
@@ -328,6 +339,32 @@ def _safe_url(value: str) -> str:
     return ""
 
 
+def _contact_confidence(c: dict) -> int:
+    """1 = generic placeholder, 2 = directory/web source, 3 = named person."""
+    if c.get("name"):
+        return 3
+    notes = (c.get("source_notes") or "").lower()
+    if any(kw in notes for kw in ("cqc", "linkedin", "companies house", "website", "nhs jobs")):
+        return 2
+    return 1
+
+
+_CONFIDENCE_LABEL = {3: "🟢 Named", 2: "🟡 Directory", 1: "⚪ Role only"}
+
+
+def _is_stale(lead: dict) -> bool:
+    """True if lead is new/contacted but hasn't been updated in 30+ days."""
+    from datetime import datetime, timedelta, timezone
+    if lead.get("status") not in ("new", "contacted"):
+        return False
+    ts = lead.get("updated_at") or lead.get("run_at") or ""
+    try:
+        dt = datetime.fromisoformat(ts[:19]).replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) - dt > timedelta(days=30)
+    except Exception:
+        return False
+
+
 def _render_contacts(contacts: list[dict]):
     """Named contacts in full; collapse pure-placeholder rows to a hint line."""
     real = [c for c in contacts
@@ -336,10 +373,15 @@ def _render_contacts(contacts: list[dict]):
                     if not c.get("name") and not c.get("email") and not c.get("phone")]
 
     for c in real:
+        conf = _CONFIDENCE_LABEL[_contact_confidence(c)]
         if c.get("name"):
-            st.markdown(f"- **{_html.escape(c['name'])}** — {_html.escape(c['role'])}")
+            st.markdown(f"- **{_html.escape(c['name'])}** — {_html.escape(c['role'])}  "
+                        f"<small style='color:#666'>{conf}</small>",
+                        unsafe_allow_html=True)
         else:
-            st.markdown(f"- _{_html.escape(c['role'])}_")
+            st.markdown(f"- _{_html.escape(c['role'])}_  "
+                        f"<small style='color:#666'>{conf}</small>",
+                        unsafe_allow_html=True)
         if c.get("email"):
             st.markdown(f"  - Email: {_html.escape(c['email'])}")
         if c.get("phone"):
@@ -357,16 +399,20 @@ def _render_contacts(contacts: list[dict]):
         st.caption("No contacts on record — use Find online links to locate.")
 
 
-def _render_lead_card(lead: dict, show_qual_note: bool = True, expanded: bool = False):
+def _render_lead_card(lead: dict, show_qual_note: bool = True, expanded: bool = False,
+                      repeat_ids: set | None = None):
     score = lead["priority_score"]
     sc = "green" if score >= 0.7 else ("orange" if score >= 0.4 else "red")
     contacts = queries.get_contacts_for_org(lead["org_id"])
 
     emoji = STATUS_EMOJI.get(lead["status"], "")
+    stale_tag = " ⚠️" if _is_stale(lead) else ""
+    repeat_tag = " ↩" if (repeat_ids and lead["org_id"] in repeat_ids) else ""
     with st.expander(
         f"{emoji}**{_html.escape(lead['name'])}** | :{sc}[{int(score*100)}] | "
         f"{_html.escape(_org_label(lead))} | "
-        f"{lead['distance_km'] or '?'} km | {status_badge(lead['status'])}",
+        f"{lead['distance_km'] or '?'} km | {status_badge(lead['status'])}"
+        f"{stale_tag}{repeat_tag}",
         expanded=expanded,
     ):
         if show_qual_note:
@@ -475,12 +521,15 @@ ALL_SOURCES = [
     "NHS (GPs, hospitals, PCNs)",
     "OpenStreetMap (hospices, pharmacies, community)",
     "Companies House (solicitors, estate agents)",
+    "CQC (homecare agencies, community care)",
     "Web / Social (dementia cafes, LinkedIn, Facebook)",
     "SOLLA (care fees IFA specialists)",
+    "Google Places (local businesses — requires API key)",
 ]
 DEFAULT_SOURCES = [
     "NHS (GPs, hospitals, PCNs)",
     "OpenStreetMap (hospices, pharmacies, community)",
+    "CQC (homecare agencies, community care)",
     "Web / Social (dementia cafes, LinkedIn, Facebook)",
 ]
 
@@ -710,7 +759,17 @@ elif page == "Lead Dashboard":
         filtered = [l for l in filtered if l["status"] in status_filter]
     filtered = [l for l in filtered if l["priority_score"] >= min_score]
 
-    st.caption(f"Showing {len(filtered)} of {len(leads)} leads")
+    # Cross-run dedup and stale detection
+    _repeat_ids = queries.get_repeat_org_ids(run_id, run["care_home_name"])
+    _stale_count = sum(1 for l in filtered if _is_stale(l))
+    _repeat_count = sum(1 for l in filtered if l["org_id"] in _repeat_ids)
+
+    _summary_parts = [f"Showing {len(filtered)} of {len(leads)} leads"]
+    if _stale_count:
+        _summary_parts.append(f"⚠️ {_stale_count} stale (30+ days without action)")
+    if _repeat_count:
+        _summary_parts.append(f"↩ {_repeat_count} seen in a previous run")
+    st.caption("  ·  ".join(_summary_parts))
 
     # Report export
     col_a, col_b, col_c, _ = st.columns([1, 1, 1, 2])
@@ -760,7 +819,7 @@ elif page == "Lead Dashboard":
         render_items.sort(key=lambda x: x[0], reverse=True)
         for _, kind, payload in render_items:
             if kind == "lead":
-                _render_lead_card(payload, show_qual_note=True)
+                _render_lead_card(payload, show_qual_note=True, repeat_ids=_repeat_ids)
             else:
                 _render_hospital_group(payload[0], payload[1], show_dept_qual=True)
 
@@ -823,7 +882,7 @@ elif page == "Lead Dashboard":
                         _render_hospital_group(parent_name, depts, show_dept_qual=False)
                 else:
                     for lead in sorted(items, key=lambda x: x["priority_score"], reverse=True):
-                        _render_lead_card(lead, show_qual_note=False)
+                        _render_lead_card(lead, show_qual_note=False, repeat_ids=_repeat_ids)
 
 
 # ── Page: Map View ────────────────────────────────────────────────────────────

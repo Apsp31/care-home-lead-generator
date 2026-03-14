@@ -83,6 +83,23 @@ def get_all_search_runs_with_users() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_repeat_org_ids(run_id: int, care_home_name: str) -> set[int]:
+    """Return org_ids in run_id that also appeared in an earlier run for the same care home."""
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT DISTINCT l2.org_id
+        FROM leads l1
+        JOIN leads l2 ON l2.org_id = l1.org_id
+        JOIN search_runs sr ON sr.id = l2.search_run_id
+        WHERE l1.search_run_id = ?
+          AND sr.care_home_name = ?
+          AND l2.search_run_id != ?
+          AND l2.search_run_id < ?
+    """, (run_id, care_home_name, run_id, run_id)).fetchall()
+    conn.close()
+    return {r["org_id"] for r in rows}
+
+
 def get_search_run(run_id: int) -> Optional[dict]:
     conn = get_connection()
     row = conn.execute("SELECT * FROM search_runs WHERE id=?", (run_id,)).fetchone()
