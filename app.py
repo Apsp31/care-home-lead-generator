@@ -2,6 +2,7 @@
 import html as _html
 import json
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -117,6 +118,32 @@ with st.sidebar:
     st.divider()
     _admin_badge = " · admin" if _current_user["is_admin"] else ""
     st.markdown(f"Logged in as **{_current_user['username']}**{_admin_badge}")
+
+    # ── Background search status ───────────────────────────────────────────────
+    @st.fragment(run_every=2)
+    def _search_status_widget():
+        job = st.session_state.get("search_job")
+        if not job:
+            return
+        status = job.get("status")
+        if status == "running":
+            st.progress(job["progress"] / 100, text=job.get("message", "Running..."))
+            st.caption("You can navigate freely — search continues in the background.")
+        elif status == "done":
+            st.success(job["message"])
+            st.session_state["active_run_id"] = job["run_id"]
+            for err in job.get("errors", []):
+                st.warning(f"Source error: {err}")
+            if st.button("Dismiss", key="dismiss_job"):
+                del st.session_state["search_job"]
+                st.rerun()
+        elif status == "error":
+            st.error(f"Search failed: {job['message']}")
+            if st.button("Dismiss", key="dismiss_job_err"):
+                del st.session_state["search_job"]
+                st.rerun()
+
+    _search_status_widget()
     if st.button("Log out", use_container_width=True):
         _auth.logout_user(st.session_state.auth_token)
         st.session_state.user = None
@@ -219,6 +246,55 @@ def run_sources(lat, lon, radius_km, selected_sources, hospital_dept_types=None)
                 errors.append(f"{src_name}: {e}")
 
     return all_orgs, errors
+
+
+def _do_search(job: dict, lat: float, lon: float, radius: float,
+               selected_sources: list, hosp_dept_types: list | None,
+               org_types_set: set, enrich_enabled: bool,
+               run_id: int, feedback_weights: dict):
+    """Background thread: fetch → filter → enrich → score → save."""
+    try:
+        job["progress"] = 10
+        job["message"] = "Querying data sources..."
+        orgs, errors = run_sources(lat, lon, radius, selected_sources,
+                                   hospital_dept_types=hosp_dept_types)
+        job["errors"] = errors
+
+        job["progress"] = 35
+        job["message"] = f"Retrieved {len(orgs)} organisations, filtering..."
+        all_types = {t for types in ORG_CATEGORY_OPTIONS.values() for t in types}
+        if org_types_set and org_types_set != all_types:
+            orgs = [o for o in orgs if o.get("org_type") in org_types_set]
+
+        has_hospitals = any(o.get("org_type", "").startswith("hospital_") for o in orgs)
+        if has_hospitals:
+            job["progress"] = 45
+            job["message"] = "Finding PALS contacts for hospitals..."
+            orgs = enrich_hospital_orgs(orgs, full_enrichment=False)
+
+        if enrich_enabled and orgs:
+            enrich_types = org_types_set & set(ENRICH_ROLES)
+            job["progress"] = 55
+            job["message"] = "Enriching contacts via LinkedIn..."
+            orgs = enrich_contacts(orgs, enrich_types if enrich_types else None)
+            if has_hospitals:
+                job["progress"] = 65
+                job["message"] = "Enriching hospital contacts from trust websites & NHS Jobs..."
+                orgs = enrich_hospital_orgs(orgs, full_enrichment=True)
+
+        job["progress"] = 75
+        job["message"] = "Scoring and saving leads..."
+        save_orgs_to_db(orgs, run_id, radius, feedback_weights)
+
+        job["orgs_count"] = len(orgs)
+        job["run_id"] = run_id
+        job["progress"] = 100
+        job["status"] = "done"
+        job["message"] = f"Complete — {len(orgs)} organisations found."
+    except Exception as e:
+        job["status"] = "error"
+        job["message"] = str(e)
+        print(f"[search_bg] Error: {e}")
 
 
 def save_orgs_to_db(orgs, run_id, radius_km, feedback_weights):
@@ -513,7 +589,10 @@ if page == "New Search":
 
         submitted = st.form_submit_button("Run Search", type="primary", use_container_width=True)
 
-    if submitted:
+    _running_job = st.session_state.get("search_job", {})
+    if _running_job.get("status") == "running":
+        st.info("A search is already running — check the sidebar for progress.")
+    elif submitted:
         if not care_home or not postcode:
             st.error("Please enter a care home name and postcode.")
         elif not selected_sources:
@@ -526,20 +605,17 @@ if page == "New Search":
                     st.error(str(e))
                     st.stop()
 
-            st.success(f"Location: {lat:.4f}, {lon:.4f}")
-
-            # Resolve selected org types from category labels
+            # Resolve org types and hospital depts
             selected_org_types: list[str] = []
             for cat in selected_org_cats:
                 selected_org_types.extend(ORG_CATEGORY_OPTIONS.get(cat, []))
             selected_org_types_set = set(selected_org_types)
 
-            # Resolve selected hospital department org_type strings
             selected_hosp_dept_types = [
                 HOSPITAL_DEPT_OPTIONS[lbl]
                 for lbl in selected_hosp_dept_labels
                 if lbl in HOSPITAL_DEPT_OPTIONS
-            ]
+            ] if selected_hosp_dept_labels != ALL_HOSPITAL_DEPTS else None
 
             feedback_weights = get_feedback_weights()
             run_id = queries.create_search_run(
@@ -551,45 +627,28 @@ if page == "New Search":
                 user_id=_current_user["id"],
             )
 
-            progress = st.progress(0, text="Querying data sources...")
-            with st.spinner("Fetching leads from data sources (this may take 30–60 seconds)..."):
-                orgs, errors = run_sources(
-                    lat, lon, radius, selected_sources,
-                    hospital_dept_types=selected_hosp_dept_types
-                        if selected_hosp_dept_labels != ALL_HOSPITAL_DEPTS else None,
-                )
+            job = {
+                "status": "running",
+                "progress": 5,
+                "message": "Starting search...",
+                "run_id": run_id,
+                "orgs_count": 0,
+                "errors": [],
+            }
+            st.session_state["search_job"] = job
 
-            # Filter by selected org categories (if not all selected)
-            if selected_org_types_set and selected_org_types_set != set(
-                t for types in ORG_CATEGORY_OPTIONS.values() for t in types
-            ):
-                orgs = [o for o in orgs if o.get("org_type") in selected_org_types_set]
+            t = threading.Thread(
+                target=_do_search,
+                args=(job, lat, lon, radius, selected_sources,
+                      selected_hosp_dept_types, selected_org_types_set,
+                      enrich_enabled, run_id, feedback_weights),
+                daemon=True,
+            )
+            t.start()
 
-            # Hospital PALS enrichment — always run if any hospital orgs found
-            has_hospitals = any(o.get("org_type", "").startswith("hospital_") for o in orgs)
-            if has_hospitals:
-                progress.progress(45, text="Finding PALS contacts for hospitals...")
-                orgs = enrich_hospital_orgs(orgs, full_enrichment=False)
-
-            if enrich_enabled and orgs:
-                enrich_types = set(selected_org_types_set) & set(ENRICH_ROLES)
-                progress.progress(50, text=f"Enriching contacts via LinkedIn ({len(enrich_types)} org types)...")
-                orgs = enrich_contacts(orgs, enrich_types if enrich_types else None)
-                if has_hospitals:
-                    progress.progress(60, text="Enriching hospital dept contacts from trust websites & NHS Jobs...")
-                    orgs = enrich_hospital_orgs(orgs, full_enrichment=True)
-
-            progress.progress(70, text="Scoring and saving leads...")
-            save_orgs_to_db(orgs, run_id, radius, feedback_weights)
-            progress.progress(100, text="Done.")
-
-            if errors:
-                for err in errors:
-                    st.warning(f"Source error: {err}")
-
-            st.success(f"Found **{len(orgs)}** organisations. Run ID: {run_id}")
-            st.info("Go to **Lead Dashboard** to view and export results.")
-            st.session_state["active_run_id"] = run_id
+            st.success(f"Search started for **{care_home}**, {postcode}. "
+                       "Progress shown in the sidebar — you can navigate freely.")
+            st.rerun()
 
 
 # ── Page: Lead Dashboard ──────────────────────────────────────────────────────
