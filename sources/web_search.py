@@ -14,7 +14,7 @@ import time
 import hashlib
 import requests
 from .base import DataSource
-from .geocoder import haversine_km
+from .geocoder import haversine_km, geocode_place
 
 try:
     from ddgs import DDGS
@@ -69,6 +69,47 @@ _HEADLINE_RE = re.compile(
     r'at karuna|inside aston|neil gaiman)\b',
     re.I
 )
+
+# Non-UK location indicators — used to reject US/international LinkedIn profiles
+_US_LOCATION_RE = re.compile(
+    r'\b(United States|USA|Florida|California|New York|Texas|Chicago|'
+    r'New Jersey|Massachusetts|Pennsylvania|Georgia|Ohio|'
+    r'Canada|Ontario|Toronto|British Columbia|'
+    r'Australia|Sydney|Melbourne|'
+    r'India|Singapore|Dubai|UAE|'
+    r'Ireland(?!\s+(Road|Street|Avenue|Lane|Close|Drive|Way|Place|Row)))\b',
+    re.I,
+)
+
+# Patterns that embed a place name inside a community org name
+_NAMED_PLACE_RES = [
+    re.compile(r'^(?:age\s+uk|age\s+concern)\s+(.+)$', re.I),
+    re.compile(r'^(.+?)\s+carers?\s+(?:group|centre|hub|support|network|trust)$', re.I),
+    re.compile(r'^(.+?)\s+day\s+cent(?:re|er)s?$', re.I),
+    re.compile(r'^(.+?)\s+(?:dementia|memory)\s+(?:cafe|café|group|support)$', re.I),
+    re.compile(r'^(.+?)\s+(?:befriending|lunch\s+club|social\s+club)$', re.I),
+]
+_GENERIC_WORDS = {'local', 'online', 'virtual', 'national', 'uk', 'the', 'community'}
+
+
+def _place_from_name(name: str) -> str | None:
+    """Extract the place name embedded in a community org name, e.g. 'Age UK Barnet' → 'Barnet'."""
+    for pat in _NAMED_PLACE_RES:
+        m = pat.match(name.strip())
+        if m:
+            place = m.group(1).strip()
+            if 3 <= len(place) <= 40 and place.lower() not in _GENERIC_WORDS:
+                return place
+    return None
+
+
+def _in_area(place: str, lat: float, lon: float, radius_km: float) -> bool:
+    """Return True if the place geocodes within radius_km * 1.5 of (lat, lon), or if unknown."""
+    coords = geocode_place(place)
+    if coords is None:
+        return True  # Can't verify — give benefit of the doubt
+    return haversine_km(lat, lon, *coords) <= radius_km * 1.5
+
 
 # (search phrase, org_type)
 COMMUNITY_SEARCHES = [
@@ -248,10 +289,14 @@ def _is_org_page(title: str, href: str, org_type: str = "") -> bool:
 
 def _clean_title(title: str) -> str:
     """Strip trailing site suffixes from a page title to get the org name."""
-    title = re.sub(r'\s*[|\-–]\s*(Home|About|Welcome|Events|Contact Us?|News|'
-                   r'Facebook|LinkedIn|Twitter|Instagram)\s*$', '', title, flags=re.I)
-    title = re.sub(r'\s*\|\s*Facebook\s*$', '', title, flags=re.I)
-    title = re.sub(r'\s*[|\-–]\s*LinkedIn\s*$', '', title, flags=re.I)
+    # Strip everything after | (parent brands, site names, etc.)
+    title = re.sub(r'\s*\|.*$', '', title)
+    # Strip known navigation labels after – or -
+    title = re.sub(
+        r'\s*[–\-]\s*(Home|About|Welcome|Events|Contact Us?|News|'
+        r'Facebook|LinkedIn|Twitter|Instagram)\s*$',
+        '', title, flags=re.I,
+    )
     return title.strip()
 
 
@@ -326,7 +371,8 @@ class WebSearchSource(DataSource):
         seen: set[str] = set()
 
         def _add(org: dict):
-            key = re.sub(r'\s+', ' ', org["name"].lower().strip())
+            key = re.sub(r'\s*\|.*$', '', org["name"])  # strip parent brand suffix
+            key = re.sub(r'\s+', ' ', key.lower().strip())
             if key and key not in seen and len(key) > 3:
                 seen.add(key)
                 results.append(org)
@@ -342,14 +388,14 @@ class WebSearchSource(DataSource):
         for phrase, org_type in FACEBOOK_SEARCHES:
             time.sleep(_DELAY)
             query = f'site:facebook.com "{phrase}" "{town}"'
-            for org in self._facebook_pages(query, org_type, lat, lon, town):
+            for org in self._facebook_pages(query, org_type, lat, lon, radius_km, town):
                 _add(org)
 
         # ── 3. LinkedIn area searches — named professionals ───────────────────
         for role_phrase, org_type in LINKEDIN_AREA_SEARCHES:
             time.sleep(_DELAY)
             query = f'site:linkedin.com/in "{role_phrase}" "{town}"'
-            for org in self._linkedin_profiles(query, org_type, lat, lon, town):
+            for org in self._linkedin_profiles(query, org_type, lat, lon, radius_km, town):
                 _add(org)
 
         # ── 4. LinkedIn company pages ─────────────────────────────────────────
@@ -382,6 +428,12 @@ class WebSearchSource(DataSource):
                 if coords:
                     org_lat, org_lon = coords
                     org_pc = postcode
+            else:
+                # No postcode — try to verify area from place name embedded in org title
+                place = _place_from_name(title)
+                if place and place.lower() not in town.lower() and town.lower() not in place.lower():
+                    if not _in_area(place, lat, lon, radius_km):
+                        continue
 
             dist = haversine_km(lat, lon, org_lat, org_lon)
             if dist > radius_km * 1.5:
@@ -393,7 +445,7 @@ class WebSearchSource(DataSource):
         return orgs
 
     def _facebook_pages(self, query: str, org_type: str,
-                        lat: float, lon: float, town: str) -> list[dict]:
+                        lat: float, lon: float, radius_km: float, town: str) -> list[dict]:
         orgs = []
         for hit in _ddg(query, max_results=4):
             href = hit.get("href", "")
@@ -417,12 +469,19 @@ class WebSearchSource(DataSource):
                     org_lat, org_lon = coords
                     org_pc = postcode
                     dist = round(haversine_km(lat, lon, org_lat, org_lon), 2)
+            else:
+                place = _place_from_name(title)
+                if place and place.lower() not in town.lower() and town.lower() not in place.lower():
+                    if not _in_area(place, lat, lon, radius_km):
+                        continue
+            if dist > radius_km * 1.5:
+                continue
             orgs.append(_make_org(title, org_type, org_lat, org_lon, dist,
                                   org_pc, town, href, f"fb::{_url_id(href)}"))
         return orgs
 
     def _linkedin_profiles(self, query: str, org_type: str,
-                           lat: float, lon: float, town: str) -> list[dict]:
+                           lat: float, lon: float, radius_km: float, town: str) -> list[dict]:
         """Find named individuals; group into org entries keyed by employer."""
         employers: dict[str, dict] = {}
         for hit in _ddg(query, max_results=6):
@@ -431,6 +490,11 @@ class WebSearchSource(DataSource):
                 continue
             contact = _parse_linkedin_profile(hit.get("title", ""), href)
             if not contact:
+                continue
+
+            # Reject US/international professionals
+            title_text = hit.get("title", "") + " " + hit.get("body", "")
+            if _US_LOCATION_RE.search(title_text):
                 continue
 
             # Derive employer name from source_notes
@@ -442,7 +506,12 @@ class WebSearchSource(DataSource):
             if not employer or len(employer) < 3 or "..." in employer or len(employer) > 70:
                 employer = f"{contact['role']}s near {town}"
 
+            # Verify employer is in the right area (geocode if it looks like a place/org name)
             if employer not in employers:
+                place = _place_from_name(employer)
+                if place and place.lower() not in town.lower() and town.lower() not in place.lower():
+                    if not _in_area(place, lat, lon, radius_km):
+                        continue
                 li_url = (f"https://www.linkedin.com/search/results/companies/"
                           f"?keywords={re.sub(chr(32), '+', employer)}")
                 employers[employer] = _make_org(

@@ -161,6 +161,7 @@ with st.sidebar:
         "Navigate",
         _nav_options,
         label_visibility="collapsed",
+        key="_nav_radio",
     )
     st.divider()
     st.caption("Set COMPANIES_HOUSE_API_KEY in .env to enable Companies House data.")
@@ -526,18 +527,21 @@ ALL_HOSPITAL_DEPTS = list(HOSPITAL_DEPT_OPTIONS.keys())
 if page == "New Search":
     st.header("New Lead Search")
 
-    # Previous search selector — pre-fills the form below (scoped to this user)
-    _uid_for_prev = None if _current_user["is_admin"] else _current_user["id"]
-    prev_runs = queries.get_distinct_care_homes(user_id=_uid_for_prev)
-    prefill: dict = {}
-    if prev_runs:
-        options = ["— New search —"] + [
-            f"{p['care_home_name']}  ({p['postcode']})" for p in prev_runs
-        ]
-        choice = st.selectbox("Load previous search", options)
-        if choice != "— New search —":
-            idx = options.index(choice) - 1
-            prefill = prev_runs[idx]
+    # Re-run shortcut — populated by "Re-run Search" button on Lead Dashboard
+    prefill: dict = st.session_state.pop("_prefill_run", {})
+
+    if not prefill:
+        # Previous search selector — pre-fills the form below (scoped to this user)
+        _uid_for_prev = None if _current_user["is_admin"] else _current_user["id"]
+        prev_runs = queries.get_distinct_care_homes(user_id=_uid_for_prev)
+        if prev_runs:
+            options = ["— New search —"] + [
+                f"{p['care_home_name']}  ({p['postcode']})" for p in prev_runs
+            ]
+            choice = st.selectbox("Load previous search", options)
+            if choice != "— New search —":
+                idx = options.index(choice) - 1
+                prefill = prev_runs[idx]
 
     prefill_sources = json.loads(prefill.get("sources") or "[]") or DEFAULT_SOURCES
     prefill_org_cats = json.loads(prefill.get("org_types") or "null") or ALL_ORG_CATEGORIES
@@ -704,7 +708,7 @@ elif page == "Lead Dashboard":
     st.caption(f"Showing {len(filtered)} of {len(leads)} leads")
 
     # Report export
-    col_a, col_b, _ = st.columns([1, 1, 3])
+    col_a, col_b, col_c, _ = st.columns([1, 1, 1, 2])
     with col_a:
         if st.button("Generate HTML Report", type="primary"):
             html = generate_report(run_id)
@@ -718,6 +722,11 @@ elif page == "Lead Dashboard":
         if st.button("Re-score (apply feedback)"):
             recalculate_scores_for_run(run_id, run["radius_km"])
             st.success("Scores updated from feedback data.")
+            st.rerun()
+    with col_c:
+        if st.button("Re-run Search", help="Re-run this search with the same settings to refresh the data"):
+            st.session_state["_prefill_run"] = dict(run)
+            st.session_state["_nav_radio"] = "New Search"
             st.rerun()
 
     # ── View mode toggle ───────────────────────────────────────────────────────

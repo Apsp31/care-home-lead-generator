@@ -1,6 +1,39 @@
 """Postcode geocoding via postcodes.io — no auth required."""
 import re
+import time as _time
 import requests
+
+_geocode_place_cache: dict[str, tuple[float, float] | None] = {}
+_nominatim_last: float = 0.0
+
+
+def geocode_place(name: str) -> tuple[float, float] | None:
+    """Geocode a UK place name → (lat, lon) via Nominatim.
+    Cached and rate-limited to 1 req/sec (Nominatim policy)."""
+    global _nominatim_last
+    key = name.strip().lower()
+    if key in _geocode_place_cache:
+        return _geocode_place_cache[key]
+    wait = 1.0 - (_time.time() - _nominatim_last)
+    if wait > 0:
+        _time.sleep(wait)
+    _nominatim_last = _time.time()
+    try:
+        resp = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": name, "countrycodes": "gb", "format": "json", "limit": 1},
+            headers={"User-Agent": "CareHomeLeadGenerator/1.0"},
+            timeout=8,
+        )
+        if resp.status_code == 200 and resp.json():
+            r = resp.json()[0]
+            result: tuple[float, float] = (float(r["lat"]), float(r["lon"]))
+            _geocode_place_cache[key] = result
+            return result
+    except Exception:
+        pass
+    _geocode_place_cache[key] = None
+    return None
 
 _POSTCODE_RE = re.compile(r'^[A-Z]{1,2}[0-9][A-Z0-9]?[0-9][A-Z]{2}$')
 
