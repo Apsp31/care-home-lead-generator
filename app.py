@@ -157,11 +157,13 @@ with st.sidebar:
     ]
     if _current_user["is_admin"]:
         _nav_options.append("Admin")
+    _goto = st.session_state.pop("_goto_page", None)
+    _nav_index = _nav_options.index(_goto) if _goto in _nav_options else 0
     page = st.radio(
         "Navigate",
         _nav_options,
+        index=_nav_index,
         label_visibility="collapsed",
-        key="_nav_radio",
     )
     st.divider()
     st.caption("Set COMPANIES_HOUSE_API_KEY in .env to enable Companies House data.")
@@ -726,7 +728,7 @@ elif page == "Lead Dashboard":
     with col_c:
         if st.button("Re-run Search", help="Re-run this search with the same settings to refresh the data"):
             st.session_state["_prefill_run"] = dict(run)
-            st.session_state["_nav_radio"] = "New Search"
+            st.session_state["_goto_page"] = "New Search"
             st.rerun()
 
     # ── View mode toggle ───────────────────────────────────────────────────────
