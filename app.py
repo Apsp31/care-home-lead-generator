@@ -509,6 +509,9 @@ ORG_CATEGORY_OPTIONS: dict[str, list[str]] = {
     "Care homes (peer)":      ["nursing_home"],
     "Domiciliary care agencies": ["domiciliary_care"],
     "Care placement advisers":   ["care_referral"],
+    "Libraries":                 ["library"],
+    "Post offices":              ["post_office"],
+    "Senior clubs (U3A, WI, Rotary)": ["senior_club"],
 }
 ALL_ORG_CATEGORIES = list(ORG_CATEGORY_OPTIONS.keys())
 
@@ -949,6 +952,10 @@ elif page == "Map View":
         "nursing_home":         "#4e342e",
         "domiciliary_care":     "#6d4c41",  # mid brown — care sector family
         "care_referral":        "#ff6f00",  # amber — high priority, distinct from other types
+        # Poster / noticeboard sites — teal/cyan family
+        "library":              "#006064",  # dark cyan
+        "post_office":          "#00838f",  # mid cyan
+        "senior_club":          "#4527a0",  # deep indigo — distinct from all other groups
     }
 
     def _marker_style(lead: dict) -> dict:
@@ -1102,6 +1109,7 @@ elif page == "Map View":
         ("Care homes (peer)",      "#4e342e"),
         ("Domiciliary care",       "#6d4c41"),
         ("Care placement advisers","#ff6f00"),
+        ("Poster sites (library, P.O., clubs)", "#006064"),
         ("Estimated location",     "#546e7a"),
     ]
     status_legend_rows = [

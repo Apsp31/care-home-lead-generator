@@ -38,6 +38,8 @@ NON_HOSPITAL_QUERIES = [
     ('office=government;government=social_services', 'social_services'),
     ('amenity=nursing_home',      'nursing_home'),
     ('amenity=retirement_home',   'nursing_home'),
+    ('amenity=library',           'library'),
+    ('amenity=post_office',       'post_office'),
 ]
 
 # Departments to generate per hospital — (dept_suffix, org_type, contacts)
@@ -142,6 +144,14 @@ CONTACTS_BY_TYPE = {
     "nursing_home": [
         {"name": "", "role": "Registered Manager",
          "source_notes": "Peer contact for cross-referrals when at capacity"},
+    ],
+    "library": [
+        {"name": "", "role": "Branch Manager / Head of Library Services",
+         "source_notes": "Manages community noticeboard and events programme; high footfall from older residents"},
+    ],
+    "post_office": [
+        {"name": "", "role": "Postmaster / Branch Manager",
+         "source_notes": "Daily footfall heavily skewed to older adults; community noticeboard and leaflet point"},
     ],
 }
 

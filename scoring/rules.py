@@ -37,6 +37,10 @@ ORG_TYPE_BASE_SCORES: dict[str, float] = {
     "nursing_home":         0.30,
     "domiciliary_care":     0.70,  # clients receiving home care; may transition to residential
     "care_referral":        0.85,  # placement advisers whose job is matching people to care homes
+    # Poster / noticeboard sites — indirect channel, brand visibility
+    "library":              0.45,
+    "post_office":          0.40,
+    "senior_club":          0.55,  # U3A / WI / Rotary — active older adults approaching care planning age
 }
 
 # Wealth indicator: likelihood that this org's clients can self-fund ~£2k/week
@@ -68,6 +72,9 @@ WEALTH_INDICATOR_SCORES: dict[str, float] = {
     "nursing_home":         0.25,
     "domiciliary_care":     0.55,  # some self-funders; many LA-funded but declining clients
     "care_referral":        0.80,  # clients actively seeking placement; often self-funders
+    "library":              0.35,
+    "post_office":          0.30,
+    "senior_club":          0.50,  # WI/U3A/Rotary — middle-class retired demographic
 }
 
 # Displayed in the report and dashboard to explain relevance
@@ -158,6 +165,19 @@ QUALIFICATION_NOTES: dict[str, str] = {
         "Care Placement Adviser / Referral Agency — their specific role is matching people to care homes. "
         "Clients are actively seeking placement, often self-funding, and have an immediate need. "
         "These are among the highest-value referral relationships available.",
+    "library":
+        "Public Library — high footfall from older residents, often with community noticeboards and an "
+        "events programme. Branch manager can arrange poster display, leaflet points, and may host "
+        "community events such as dementia-friendly sessions.",
+    "post_office":
+        "Post Office — daily footfall heavily skewed to older adults (pension collection, form-filling). "
+        "Noticeboards and counter-top leaflet stands are standard; postmaster is usually receptive to "
+        "community health materials.",
+    "senior_club":
+        "Senior Social Club (U3A / Women's Institute / Rotary / Probus / Bowls Club) — active retired "
+        "members are at or approaching care planning age. Chair and secretary circulate newsletters and "
+        "notices to the whole membership. A talk at a meeting or flyer in a newsletter reaches a highly "
+        "targeted audience of asset-owning older adults.",
 }
 
 # Component weights — must sum to 1.0

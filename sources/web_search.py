@@ -53,6 +53,10 @@ _TYPE_KEYWORDS: dict[str, set[str]] = {
     "community_group":  {"community", "befriend", "lunch club", "social club"},
     "domiciliary_care": {"domiciliary", "home care", "homecare", "care at home"},
     "care_referral":    {"placement", "referral", "care adviser", "care finder", "navigator"},
+    "senior_club":      {"u3a", "university of the third age", "women's institute",
+                         "rotary", "probus", "bowls club", "bowling club"},
+    "library":          {"library", "libraries"},
+    "post_office":      {"post office"},
 }
 
 # URL path patterns that indicate an article/news page rather than an org homepage
@@ -88,6 +92,10 @@ _NAMED_PLACE_RES = [
     re.compile(r'^(.+?)\s+day\s+cent(?:re|er)s?$', re.I),
     re.compile(r'^(.+?)\s+(?:dementia|memory)\s+(?:cafe|café|group|support)$', re.I),
     re.compile(r'^(.+?)\s+(?:befriending|lunch\s+club|social\s+club)$', re.I),
+    re.compile(r'^(.+?)\s+(?:library|libraries|public\s+library)$', re.I),
+    re.compile(r'^(.+?)\s+post\s+office$', re.I),
+    re.compile(r'^(?:u3a|university\s+of\s+the\s+third\s+age)\s+(.+)$', re.I),
+    re.compile(r'^(.+?)\s+(?:u3a|rotary\s+club|women\'s\s+institute|probus|bowls?\s+club)$', re.I),
 ]
 _GENERIC_WORDS = {'local', 'online', 'virtual', 'national', 'uk', 'the', 'community'}
 
@@ -132,6 +140,12 @@ COMMUNITY_SEARCHES = [
     ("care placement adviser",           "care_referral"),
     ("care home finder",                 "care_referral"),
     ("care navigator elderly",           "care_referral"),
+    ("U3A branch",                       "senior_club"),
+    ("University of the Third Age",      "senior_club"),
+    ("Women's Institute branch",         "senior_club"),
+    ("Rotary club",                      "senior_club"),
+    ("Probus club retired",              "senior_club"),
+    ("bowls club seniors",               "senior_club"),
 ]
 
 FACEBOOK_SEARCHES = [
@@ -203,6 +217,12 @@ CONTACTS_BY_TYPE = {
          "source_notes": "Their job is matching people to care homes — highest-value referral contact"},
         {"name": "", "role": "Care Navigator",
          "source_notes": "Guides families through care options; direct route to placement referrals"},
+    ],
+    "senior_club": [
+        {"name": "", "role": "Chair / Group Organiser",
+         "source_notes": "Organises meetings for active older adults — members are at or approaching care planning age"},
+        {"name": "", "role": "Secretary",
+         "source_notes": "Circulates notices and newsletters to all members; good route for event flyers"},
     ],
 }
 

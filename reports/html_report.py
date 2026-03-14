@@ -43,6 +43,10 @@ ORG_TYPE_LABELS = {
     "nursing_home":         "Other Care & Nursing Homes",
     "domiciliary_care":     "Domiciliary Care Agencies",
     "care_referral":        "Care Placement Advisers & Referral Agencies",
+    # Poster / noticeboard sites
+    "library":              "Libraries",
+    "post_office":          "Post Offices",
+    "senior_club":          "Senior Clubs (U3A, WI, Rotary, Probus, Bowls)",
 }
 
 # Display order — highest wealth indicator / referral priority first
