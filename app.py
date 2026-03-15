@@ -735,8 +735,11 @@ elif page == "Lead Dashboard":
         st.info("No leads found for this run.")
         st.stop()
 
+    # Cross-run repeat detection (needed by filter below)
+    _repeat_ids = queries.get_repeat_org_ids(run_id, run["care_home_name"])
+
     # Filters
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         type_filter = st.multiselect(
             "Org type",
@@ -747,10 +750,16 @@ elif page == "Lead Dashboard":
         status_filter = st.multiselect(
             "Status",
             options=STATUS_OPTIONS,
-            default=["new"],
+            default=["new", "contacted", "converted", "not_converted"],
         )
     with col3:
         min_score = st.slider("Min priority score", 0.0, 1.0, 0.0, 0.05)
+    with col4:
+        new_this_run = st.toggle(
+            "First seen this run",
+            value=False,
+            help="Show only orgs that have never appeared in a previous run for this care home",
+        )
 
     filtered = leads
     if type_filter:
@@ -758,9 +767,8 @@ elif page == "Lead Dashboard":
     if status_filter:
         filtered = [l for l in filtered if l["status"] in status_filter]
     filtered = [l for l in filtered if l["priority_score"] >= min_score]
-
-    # Cross-run dedup and stale detection
-    _repeat_ids = queries.get_repeat_org_ids(run_id, run["care_home_name"])
+    if new_this_run:
+        filtered = [l for l in filtered if l["org_id"] not in _repeat_ids]
     _stale_count = sum(1 for l in filtered if _is_stale(l))
     _repeat_count = sum(1 for l in filtered if l["org_id"] in _repeat_ids)
 
@@ -935,7 +943,7 @@ elif page == "Map View":
         map_status_filter = st.multiselect(
             "Status",
             options=STATUS_OPTIONS,
-            default=["new"],
+            default=["new", "contacted", "converted", "not_converted"],
             key="map_status_filter",
         )
     with col3:
