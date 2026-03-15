@@ -747,7 +747,7 @@ elif page == "Lead Dashboard":
         status_filter = st.multiselect(
             "Status",
             options=STATUS_OPTIONS,
-            default=["new", "contacted", "converted", "not_converted"],
+            default=["new"],
         )
     with col3:
         min_score = st.slider("Min priority score", 0.0, 1.0, 0.0, 0.05)
@@ -935,7 +935,7 @@ elif page == "Map View":
         map_status_filter = st.multiselect(
             "Status",
             options=STATUS_OPTIONS,
-            default=["new", "contacted", "converted", "not_converted"],
+            default=["new"],
             key="map_status_filter",
         )
     with col3:
