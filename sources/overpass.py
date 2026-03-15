@@ -221,7 +221,7 @@ class OverpassSource(DataSource):
                 continue
 
             base = {
-                "address_line1": tags.get("addr:street", ""),
+                "address_line1": " ".join(filter(None, [tags.get("addr:housenumber", ""), tags.get("addr:street", "")])),
                 "address_line2": "",
                 "town": tags.get("addr:city", tags.get("addr:town", "")),
                 "postcode": tags.get("addr:postcode", ""),
@@ -287,7 +287,7 @@ class OverpassSource(DataSource):
                     "org_type": org_type,
                     "source": self.name,
                     "source_id": el_id,
-                    "address_line1": tags.get("addr:street", ""),
+                    "address_line1": " ".join(filter(None, [tags.get("addr:housenumber", ""), tags.get("addr:street", "")])),
                     "address_line2": "",
                     "town": tags.get("addr:city", tags.get("addr:town", "")),
                     "postcode": tags.get("addr:postcode", ""),

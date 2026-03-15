@@ -135,7 +135,7 @@ class CompaniesHouseSource(DataSource):
                 "org_type": org_type,
                 "source": self.name,
                 "source_id": company_number,
-                "address_line1": addr.get("address_line_1", ""),
+                "address_line1": " ".join(filter(None, [addr.get("premises", ""), addr.get("address_line_1", "")])),
                 "address_line2": addr.get("address_line_2", ""),
                 "town": addr.get("locality", ""),
                 "postcode": postcode,

@@ -1,12 +1,14 @@
 """CQC Registered Providers — homecare agencies and community social care.
 
-Uses CQC public API v1 (no authentication required).
+Uses CQC public API v1. CQC now requires a subscription key — register free at
+https://developer.api.cqc.org.uk/ and set CQC_API_KEY in .env.
 Strategy:
   1. Resolve local authority from coordinates via postcodes.io
   2. Fetch all non-residential registered locations in that LA
   3. Geocode each by postcode; haversine distance filter
   4. Fetch provider detail for registered manager name (cached per provider)
 """
+import os
 import re
 import time
 import requests
@@ -70,9 +72,11 @@ def _map_type(location: dict) -> str | None:
     return None
 
 
-def _fetch_provider(provider_id: str) -> dict:
+def _fetch_provider(provider_id: str, api_key: str) -> dict:
     try:
-        resp = requests.get(f"{_CQC_BASE}/providers/{provider_id}", timeout=15)
+        resp = requests.get(f"{_CQC_BASE}/providers/{provider_id}",
+                            headers={"Ocp-Apim-Subscription-Key": api_key},
+                            timeout=15)
         if resp.status_code == 200:
             return resp.json()
     except Exception:
@@ -108,7 +112,14 @@ def _extract_contacts(provider: dict, org_type: str) -> list[dict]:
 class CQCSource(DataSource):
     name = "cqc"
 
+    def __init__(self):
+        self.api_key = os.getenv("CQC_API_KEY", "")
+
     def fetch(self, lat: float, lon: float, radius_km: float) -> list[dict]:
+        if not self.api_key:
+            print("[cqc] No API key — register free at https://developer.api.cqc.org.uk/ "
+                  "and set CQC_API_KEY in .env. Skipping.")
+            return []
         la = _local_authority(lat, lon)
         if not la:
             print("[cqc] Could not determine local authority.")
@@ -124,6 +135,7 @@ class CQCSource(DataSource):
                     "careHome": "N",
                     "perPage": 1000,
                 },
+                headers={"Ocp-Apim-Subscription-Key": self.api_key},
                 timeout=30,
             )
         except Exception as e:
@@ -162,7 +174,7 @@ class CQCSource(DataSource):
             if provider_id:
                 if provider_id not in provider_cache:
                     time.sleep(_DELAY)
-                    provider_cache[provider_id] = _fetch_provider(provider_id)
+                    provider_cache[provider_id] = _fetch_provider(provider_id, self.api_key)
                 contacts = _extract_contacts(provider_cache[provider_id], org_type)
             if not contacts:
                 contacts = list(_ROLE_PLACEHOLDERS.get(org_type, []))

@@ -170,7 +170,7 @@ with st.sidebar:
     st.divider()
     st.caption("Set COMPANIES_HOUSE_API_KEY in .env to enable Companies House data.")
     st.caption("Set GOOGLE_PLACES_API_KEY in .env to enable Google Places data.")
-    st.caption("CQC and SOLLA sources require no API key.")
+    st.caption("Set CQC_API_KEY in .env for CQC data (free — register at developer.api.cqc.org.uk). SOLLA requires no key.")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -529,8 +529,8 @@ ALL_SOURCES = [
 DEFAULT_SOURCES = [
     "NHS (GPs, hospitals, PCNs)",
     "OpenStreetMap (hospices, pharmacies, community)",
-    "CQC (homecare agencies, community care)",
     "Web / Social (dementia cafes, LinkedIn, Facebook)",
+    "SOLLA (care fees IFA specialists)",
 ]
 
 # Org categories for the picker — label → list of org_type strings
