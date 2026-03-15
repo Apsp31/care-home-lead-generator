@@ -113,6 +113,31 @@ def init_db():
                 conn.commit()
             except Exception:
                 pass
+
+        # One-time cleanup: remove duplicate leads within the same run caused by
+        # the same physical location appearing as both a node and way in OSM.
+        # Keep the lead with the lower id (first inserted); delete its duplicates.
+        try:
+            conn.execute("""
+                DELETE FROM leads
+                WHERE id IN (
+                    SELECT l2.id
+                    FROM leads l1
+                    JOIN leads l2
+                      ON l1.search_run_id = l2.search_run_id
+                      AND l1.id < l2.id
+                    JOIN organisations o1 ON o1.id = l1.org_id
+                    JOIN organisations o2 ON o2.id = l2.org_id
+                    WHERE o1.name = o2.name
+                      AND o1.org_type = o2.org_type
+                      AND o1.source = o2.source
+                      AND abs(COALESCE(o1.lat,0) - COALESCE(o2.lat,0)) < 0.01
+                      AND abs(COALESCE(o1.lon,0) - COALESCE(o2.lon,0)) < 0.01
+                )
+            """)
+            conn.commit()
+        except Exception:
+            pass
         conn.close()
 
 

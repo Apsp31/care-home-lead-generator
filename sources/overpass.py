@@ -206,6 +206,7 @@ class OverpassSource(DataSource):
         elements = self._post_with_fallback(ql, timeout=30)
 
         results = []
+        seen_hospitals: dict[str, tuple[float, float]] = {}  # name → (lat, lon)
         for el in elements:
             tags = el.get("tags", {})
             name = tags.get("name", "")
@@ -215,6 +216,15 @@ class OverpassSource(DataSource):
             el_lat, el_lon, _ = _latlon_from_element(el, tags, lat, lon)
             if el_lat is None:
                 continue
+
+            # Deduplicate: OSM often has the same hospital as both a node and a way.
+            # If we've already seen a hospital with this name within 1km, skip.
+            name_key = name.lower()
+            if name_key in seen_hospitals:
+                prev_lat, prev_lon = seen_hospitals[name_key]
+                if haversine_km(prev_lat, prev_lon, el_lat, el_lon) < 1.0:
+                    continue
+            seen_hospitals[name_key] = (el_lat, el_lon)
 
             dist = haversine_km(lat, lon, el_lat, el_lon)
             if dist > radius_km:
@@ -259,6 +269,7 @@ class OverpassSource(DataSource):
         """Per-type Overpass queries (one request per amenity type) to avoid 504s on large unions."""
         results = []
         seen_ids: set[str] = set()
+        seen_by_name: dict[str, tuple[float, float]] = {}  # (name, org_type) → (lat, lon)
 
         for tag_filter, org_type in NON_HOSPITAL_QUERIES:
             time.sleep(1)
@@ -281,6 +292,15 @@ class OverpassSource(DataSource):
 
                 el_lat, el_lon, precise = _latlon_from_element(el, tags, lat, lon)
                 dist = round(haversine_km(lat, lon, el_lat, el_lon), 2) if precise else 0.0
+
+                # Deduplicate same-name, same-type locations within 0.3km
+                # (node + way for the same physical building)
+                name_type_key = (name.lower(), org_type)
+                if name_type_key in seen_by_name:
+                    pv_lat, pv_lon = seen_by_name[name_type_key]
+                    if precise and haversine_km(pv_lat, pv_lon, el_lat, el_lon) < 0.3:
+                        continue
+                seen_by_name[name_type_key] = (el_lat, el_lon)
 
                 results.append({
                     "name": name,
