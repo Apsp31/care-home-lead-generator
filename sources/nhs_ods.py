@@ -1,7 +1,7 @@
 """NHS ODS ORD API — GP practices, NHS trusts, PCNs."""
 import requests
 from .base import DataSource
-from .geocoder import haversine_km, postcode_to_latlon
+from .geocoder import haversine_km
 
 # ODS role codes
 ROLE_CODES = {
@@ -11,6 +11,67 @@ ROLE_CODES = {
 }
 
 BASE_URL = "https://directory.spineservices.nhs.uk/ORD/2-0-0/organisations"
+_POSTCODES_IO = "https://api.postcodes.io"
+
+
+def _nearby_outcodes(lat: float, lon: float, radius_km: float) -> list[str]:
+    """Return outward codes (e.g. 'WD23', 'HA6') within radius_km of lat/lon."""
+    try:
+        # Get the local outward code
+        resp = requests.get(f"{_POSTCODES_IO}/outcodes",
+                            params={"lat": lat, "lon": lon}, timeout=10)
+        if resp.status_code != 200:
+            return []
+        results = resp.json().get("result") or []
+        if not results:
+            return []
+        outcode = results[0]["outcode"]
+        # Get nearby outward codes within radius
+        r2 = requests.get(f"{_POSTCODES_IO}/outcodes/{outcode}/nearest",
+                          params={"limit": 40, "radius": int(radius_km * 1000)},
+                          timeout=10)
+        if r2.status_code != 200:
+            return [outcode]
+        return [r["outcode"] for r in (r2.json().get("result") or [])]
+    except Exception:
+        return []
+
+
+def _bulk_geocode(postcodes: list[str]) -> dict[str, tuple[float, float]]:
+    """Batch geocode up to 100 postcodes at a time via postcodes.io.
+    Falls back to /terminated_postcodes for postcodes not found in bulk lookup.
+    Returns {normalised_postcode: (lat, lon)}."""
+    result: dict[str, tuple[float, float]] = {}
+    for i in range(0, len(postcodes), 100):
+        batch = postcodes[i:i + 100]
+        try:
+            resp = requests.post(f"{_POSTCODES_IO}/postcodes",
+                                 json={"postcodes": batch}, timeout=15)
+            if resp.status_code != 200:
+                continue
+            for item in resp.json().get("result", []):
+                if not item:
+                    continue
+                key = item["query"].replace(" ", "").upper()
+                r = item.get("result")
+                if r and r.get("latitude") is not None and r.get("longitude") is not None:
+                    result[key] = (float(r["latitude"]), float(r["longitude"]))
+                else:
+                    # NHS facilities often use terminated postcodes
+                    try:
+                        tr = requests.get(
+                            f"https://api.postcodes.io/terminated_postcodes/{key}",
+                            timeout=5
+                        )
+                        if tr.status_code == 200:
+                            td = tr.json().get("result", {})
+                            if td.get("latitude") is not None:
+                                result[key] = (float(td["latitude"]), float(td["longitude"]))
+                    except Exception:
+                        pass
+        except Exception:
+            continue
+    return result
 
 
 class NHSODSSource(DataSource):
@@ -28,48 +89,48 @@ class NHSODSSource(DataSource):
 
     def _fetch_role(self, role_code: str, org_type: str,
                    lat: float, lon: float, radius_km: float) -> list[dict]:
-        params = {
-            "PrimaryRoleId": role_code,
-            "Status": "Active",
-            "Limit": 1000,
-            "Offset": 0,
-        }
-        resp = requests.get(BASE_URL, params=params, timeout=15,
-                            headers={"Accept": "application/json"})
-        resp.raise_for_status()
-        data = resp.json()
-        organisations = data.get("Organisations", [])
+        if org_type == "GP":
+            organisations = self._list_gps_by_outcodes(lat, lon, radius_km)
+        else:
+            resp = requests.get(BASE_URL,
+                                params={"PrimaryRoleId": role_code, "Status": "Active",
+                                        "Limit": 1000},
+                                headers={"Accept": "application/json"}, timeout=15)
+            resp.raise_for_status()
+            organisations = resp.json().get("Organisations", [])
+
+        # Batch-geocode all postcodes in a few requests instead of one per org
+        postcodes = [
+            o.get("PostCode", "").replace(" ", "").upper()
+            for o in organisations
+            if o.get("PostCode")
+        ]
+        geo_cache = _bulk_geocode(postcodes)
 
         results = []
         for org in organisations:
-            # Fetch detail to get address + location
-            try:
-                detail = self._fetch_detail(org["OrgId"])
-            except Exception:
+            list_pc = org.get("PostCode", "").replace(" ", "").upper()
+            coords = geo_cache.get(list_pc)
+            if not coords:
                 continue
-
-            geo = detail.get("GeoLoc", {}).get("Location", {})
-            org_lat = geo.get("lat")
-            org_lon = geo.get("lng")
-
-            # Fall back to postcode geocoding when ODS has no coordinates
+            org_lat, org_lon = coords
             if org_lat is None or org_lon is None:
-                addr_parts_tmp = detail.get("Addresses", [{}])[0] if detail.get("Addresses") else {}
-                pc = addr_parts_tmp.get("PostCode", "")
-                if pc:
-                    try:
-                        org_lat, org_lon = postcode_to_latlon(pc)
-                    except Exception:
-                        pass
-                if org_lat is None or org_lon is None:
-                    continue
+                continue
 
             dist = haversine_km(lat, lon, org_lat, org_lon)
             if dist > radius_km:
                 continue
 
-            addr = detail.get("Rels", {})
-            addr_parts = detail.get("Addresses", [{}])[0] if detail.get("Addresses") else {}
+            # Only fetch full detail for in-range orgs
+            try:
+                detail = self._fetch_detail(org["OrgId"])
+            except Exception:
+                continue
+
+            # ODS stores address in GeoLoc.Location; Addresses array is often null
+            geo_loc = detail.get("GeoLoc", {}).get("Location", {}) or {}
+            addr_list = detail.get("Addresses") or []
+            addr = addr_list[0] if addr_list else geo_loc
 
             contacts = []
             if org_type == "GP":
@@ -87,7 +148,7 @@ class NHSODSSource(DataSource):
                     {"name": "", "role": "PCN Clinical Director", "source_notes": "Role placeholder"},
                 ]
 
-            raw_contacts = detail.get("Contacts", [])
+            raw_contacts = (detail.get("Contacts") or {}).get("Contact", [])
             phone   = next((c["value"] for c in raw_contacts if c.get("type") == "tel"), "")
             website = next((c["value"] for c in raw_contacts if c.get("type") == "http"), "")
             email   = next((c["value"] for c in raw_contacts if c.get("type") == "email"), "")
@@ -97,10 +158,10 @@ class NHSODSSource(DataSource):
                 "org_type": org_type,
                 "source": self.name,
                 "source_id": org["OrgId"],
-                "address_line1": addr_parts.get("AddrLn1", ""),
-                "address_line2": addr_parts.get("AddrLn2", ""),
-                "town": addr_parts.get("Town", ""),
-                "postcode": addr_parts.get("PostCode", ""),
+                "address_line1": addr.get("AddrLn1", ""),
+                "address_line2": addr.get("AddrLn2", ""),
+                "town": addr.get("Town", ""),
+                "postcode": addr.get("PostCode", list_pc),
                 "lat": org_lat,
                 "lon": org_lon,
                 "distance_km": round(dist, 2),
@@ -111,6 +172,38 @@ class NHSODSSource(DataSource):
             })
 
         return results
+
+    def _list_gps_by_outcodes(self, lat: float, lon: float,
+                               radius_km: float) -> list[dict]:
+        """Fetch GPs by querying ODS once per nearby outward code — much faster
+        than paginating through all 12 000+ RO177 prescribing cost centres."""
+        outcodes = _nearby_outcodes(lat, lon, radius_km)
+        if not outcodes:
+            # Fallback: single page of 1000 from full list
+            resp = requests.get(BASE_URL,
+                                params={"PrimaryRoleId": "RO177", "Status": "Active",
+                                        "Limit": 1000},
+                                headers={"Accept": "application/json"}, timeout=15)
+            resp.raise_for_status()
+            return resp.json().get("Organisations", [])
+
+        seen: set[str] = set()
+        organisations: list[dict] = []
+        for outcode in outcodes:
+            try:
+                resp = requests.get(BASE_URL,
+                                    params={"PrimaryRoleId": "RO177", "Status": "Active",
+                                            "PostCode": outcode, "Limit": 1000},
+                                    headers={"Accept": "application/json"}, timeout=15)
+                if resp.status_code != 200:
+                    continue
+                for o in resp.json().get("Organisations", []):
+                    if o["OrgId"] not in seen:
+                        seen.add(o["OrgId"])
+                        organisations.append(o)
+            except Exception:
+                continue
+        return organisations
 
     def _fetch_detail(self, org_id: str) -> dict:
         resp = requests.get(f"{BASE_URL}/{org_id}", timeout=10,
