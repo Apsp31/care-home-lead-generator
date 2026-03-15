@@ -324,6 +324,22 @@ def upsert_scoring_weight(org_type: str, base_weight: float,
         conn.close()
 
 
+def clear_all_data():
+    """Delete all search data (leads, orgs, contacts, runs, scoring weights).
+    Preserves users and sessions. Intended for admin use only."""
+    with DB_LOCK:
+        conn = get_connection()
+        conn.executescript("""
+            DELETE FROM leads;
+            DELETE FROM contacts;
+            DELETE FROM organisations;
+            DELETE FROM search_runs;
+            DELETE FROM scoring_weights;
+        """)
+        conn.commit()
+        conn.close()
+
+
 def get_feedback_counts_by_type() -> dict[str, dict]:
     """Returns contacted/converted counts grouped by org_type."""
     conn = get_connection()

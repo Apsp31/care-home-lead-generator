@@ -1548,3 +1548,13 @@ elif page == "Admin":
             for r in all_runs
         ]
         st.dataframe(table_rows, use_container_width=True)
+
+    # ── Danger Zone ────────────────────────────────────────────────────────────
+    st.divider()
+    st.subheader("Danger Zone")
+    st.warning("Clears all search runs, leads, organisations and contacts. Users are preserved.")
+    confirm = st.checkbox("I understand this cannot be undone", key="confirm_clear_db")
+    if st.button("Clear all data", type="primary", disabled=not confirm, key="btn_clear_db"):
+        queries.clear_all_data()
+        st.success("Database cleared.")
+        st.rerun()
