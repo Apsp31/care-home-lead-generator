@@ -119,8 +119,8 @@ class CQCSource(DataSource):
 
     def fetch(self, lat: float, lon: float, radius_km: float) -> list[dict]:
         if not self.api_key:
-            print("[cqc] No API key — register free at https://api-portal.service.cqc.org.uk/ "
-                  "and set CQC_API_KEY in .env. Skipping.")
+            print("[cqc] No API key set — register free at https://api-portal.service.cqc.org.uk/ "
+                  "and add CQC_API_KEY to .env. Skipping.")
             return []
         la = _local_authority(lat, lon)
         if not la:
@@ -215,6 +215,10 @@ class CQCSource(DataSource):
                     headers={"Ocp-Apim-Subscription-Key": self.api_key},
                     timeout=30,
                 )
+                if r.status_code in (401, 403):
+                    print(f"[cqc] API key rejected (HTTP {r.status_code}) — "
+                          "check CQC_API_KEY is correct and your subscription is active.")
+                    return []
                 if r.status_code != 200:
                     print(f"[cqc] HTTP {r.status_code} on page {page}")
                     break

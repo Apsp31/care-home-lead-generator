@@ -168,9 +168,12 @@ with st.sidebar:
         label_visibility="collapsed",
     )
     st.divider()
-    st.caption("Set COMPANIES_HOUSE_API_KEY in .env to enable Companies House data.")
-    st.caption("Set GOOGLE_PLACES_API_KEY in .env to enable Google Places data.")
-    st.caption("Set CQC_API_KEY in .env for CQC data (free — register at developer.api.cqc.org.uk). SOLLA requires no key.")
+    if not os.getenv("COMPANIES_HOUSE_API_KEY"):
+        st.caption("Set COMPANIES_HOUSE_API_KEY in .env to enable Companies House data.")
+    if not os.getenv("GOOGLE_PLACES_API_KEY"):
+        st.caption("Set GOOGLE_PLACES_API_KEY in .env to enable Google Places data.")
+    if not os.getenv("CQC_API_KEY"):
+        st.caption("Set CQC_API_KEY in .env for CQC data (free — register at api-portal.service.cqc.org.uk).")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
