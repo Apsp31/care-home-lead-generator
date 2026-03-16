@@ -5,7 +5,7 @@ Versions are auto-incremented on each commit (major.minor).
 
 ---
 
-## v1.29 — 2026-03-16
+## v1.31 — 2026-03-16
 
 ### Fixed
 - Sidebar API key captions (Companies House, Google Places, CQC) now only shown when the key is absent
@@ -13,7 +13,7 @@ Versions are auto-incremented on each commit (major.minor).
 
 ---
 
-## v1.28 — 2026-03-16
+## v1.29 — 2026-03-16
 
 ### Fixed
 - CQC source updated for new API endpoint (`api.service.cqc.org.uk`): list endpoint now returns only id/name/postcode; now paginates list → bulk geocode → fetch detail per in-range location; registrationStatus, address, phone from detail response
