@@ -5,6 +5,57 @@ Versions are auto-incremented on each commit (major.minor).
 
 ---
 
+## v1.28 — 2026-03-16
+
+### Fixed
+- CQC source updated for new API endpoint (`api.service.cqc.org.uk`): list endpoint now returns only id/name/postcode; now paginates list → bulk geocode → fetch detail per in-range location; registrationStatus, address, phone from detail response
+- CQC local authority lookup now uses `admin_county` (e.g. Hertfordshire) not `admin_district` (e.g. Watford) — county-level matches CQC's LA filter
+- `bulk_geocode_postcodes` moved to `geocoder.py` and shared between CQC and NHS ODS sources
+
+---
+
+## v1.27 — 2026-03-16
+
+### Added
+- "First seen this run" toggle on Lead Dashboard — filters to orgs that have never appeared in a prior run for the same care home (uses `get_repeat_org_ids`)
+
+---
+
+## v1.25 — 2026-03-16
+
+### Added
+- Admin: Danger Zone — clear all data button (requires checkbox confirmation); preserves users and sessions
+
+---
+
+## v1.24 — 2026-03-16
+
+### Fixed
+- OSM node/way duplicates removed: hospital dedup by name+proximity (<1km) in `_fetch_hospitals`; non-hospital dedup by name+type+proximity (<0.3km) in `_batch_query`
+- DB migration on startup removes ~60 existing duplicate leads from prior runs
+
+---
+
+## v1.23 — 2026-03-16
+
+### Fixed
+- Overpass: `address_line1` now combines `addr:housenumber` + `addr:street` (was missing house numbers)
+- Companies House: `address_line1` now combines `premises` + `address_line_1`
+- CQC source: added `Ocp-Apim-Subscription-Key` authentication header; `CQC_API_KEY` env var required
+
+---
+
+## v1.22 — 2026-03-16
+
+### Fixed
+- NHS ODS GP surgeries now correctly geocoded: switched from paginating 12,000+ orgs to querying by outward code (geographic pre-filter via postcodes.io `/outcodes/nearest`)
+- Address extracted from `Addresses` array (not `GeoLoc.Location` which holds only address fields, not lat/lon)
+- Contacts parsed correctly from `{"Contact": [...]}` dict structure
+- Terminated postcodes handled via `/terminated_postcodes/{pc}` fallback in bulk geocoder
+- Removed invalid `Offset=0` parameter (caused 406 from ODS API)
+
+---
+
 ## v1.18 — 2026-03-14
 
 ### Fixed
