@@ -1,21 +1,21 @@
 """CQC Registered Providers — homecare agencies and community social care.
 
 Uses CQC public API v1. CQC now requires a subscription key — register free at
-https://developer.api.cqc.org.uk/ and set CQC_API_KEY in .env.
+https://api-portal.service.cqc.org.uk/ and set CQC_API_KEY in .env.
 Strategy:
-  1. Resolve local authority from coordinates via postcodes.io
-  2. Fetch all non-residential registered locations in that LA
-  3. Geocode each by postcode; haversine distance filter
-  4. Fetch provider detail for registered manager name (cached per provider)
+  1. Resolve county-level local authority from coordinates via postcodes.io
+  2. Paginate all non-care-home locations in that LA (list returns id/name/postcode only)
+  3. Bulk geocode postcodes; haversine filter to radius
+  4. Fetch full location detail for each in-range location (registrationStatus, address, phone, types)
+  5. Fetch provider detail for registered manager name (cached per provider)
 """
 import os
-import re
 import time
 import requests
 from .base import DataSource
-from .geocoder import haversine_km, postcode_to_latlon
+from .geocoder import haversine_km, bulk_geocode_postcodes
 
-_CQC_BASE = "https://api.cqc.org.uk/public/v1"
+_CQC_BASE = "https://api.service.cqc.org.uk/public/v1"
 _DELAY = 0.25  # seconds between provider detail calls
 
 # CQC gacServiceType name → our org_type; None = skip
@@ -53,7 +53,9 @@ def _local_authority(lat: float, lon: float) -> str:
         if resp.status_code == 200:
             results = resp.json().get("result") or []
             if results:
-                return results[0].get("admin_district", "")
+                r0 = results[0]
+                # CQC uses county-level LAs (e.g. "Hertfordshire"), not districts ("Watford")
+                return r0.get("admin_county") or r0.get("admin_district", "")
     except Exception:
         pass
     return ""
@@ -117,7 +119,7 @@ class CQCSource(DataSource):
 
     def fetch(self, lat: float, lon: float, radius_km: float) -> list[dict]:
         if not self.api_key:
-            print("[cqc] No API key — register free at https://developer.api.cqc.org.uk/ "
+            print("[cqc] No API key — register free at https://api-portal.service.cqc.org.uk/ "
                   "and set CQC_API_KEY in .env. Skipping.")
             return []
         la = _local_authority(lat, lon)
@@ -125,51 +127,51 @@ class CQCSource(DataSource):
             print("[cqc] Could not determine local authority.")
             return []
 
-        print(f"[cqc] Querying non-residential providers in: {la}")
-        try:
-            resp = requests.get(
-                f"{_CQC_BASE}/locations",
-                params={
-                    "localAuthority": la,
-                    "registrationStatus": "Registered",
-                    "careHome": "N",
-                    "perPage": 1000,
-                },
-                headers={"Ocp-Apim-Subscription-Key": self.api_key},
-                timeout=30,
-            )
-        except Exception as e:
-            print(f"[cqc] API error: {e}")
-            return []
+        print(f"[cqc] Fetching non-care-home locations in: {la}")
+        all_locs = self._list_all_locations(la)
+        print(f"[cqc] {len(all_locs)} locations found; geocoding postcodes...")
 
-        if resp.status_code != 200:
-            print(f"[cqc] HTTP {resp.status_code}")
-            return []
+        # Bulk geocode all postcodes, then filter by radius
+        postcodes = [l["postalCode"] for l in all_locs if l.get("postalCode")]
+        geo_cache = bulk_geocode_postcodes(postcodes)
 
-        locations = resp.json().get("locations", [])
+        in_range: list[tuple[dict, float]] = []
+        for loc in all_locs:
+            pc = (loc.get("postalCode") or "").replace(" ", "").upper()
+            coords = geo_cache.get(pc)
+            if not coords:
+                continue
+            org_lat, org_lon = coords
+            if org_lat is None or org_lon is None:
+                continue
+            dist = haversine_km(lat, lon, org_lat, org_lon)
+            if dist <= radius_km:
+                in_range.append((loc, dist))
+
+        print(f"[cqc] {len(in_range)} locations within {radius_km} km; fetching details...")
+
         results = []
         provider_cache: dict[str, dict] = {}
 
-        for loc in locations:
-            org_type = _map_type(loc)
+        for loc, dist in in_range:
+            time.sleep(_DELAY)
+            detail = self._fetch_location(loc["locationId"])
+            if not detail:
+                continue
+            if detail.get("registrationStatus") != "Registered":
+                continue
+
+            org_type = _map_type(detail)
             if not org_type:
                 continue
 
-            postcode = loc.get("postalCode", "")
-            if not postcode:
-                continue
+            # Prefer ONSPD lat/lon from detail; fall back to geocoded postcode
+            pc = (loc.get("postalCode") or "").replace(" ", "").upper()
+            coords = geo_cache.get(pc, (None, None))
+            org_lat = detail.get("onspdLatitude") or (coords[0] if coords else None)
+            org_lon = detail.get("onspdLongitude") or (coords[1] if coords else None)
 
-            try:
-                org_lat, org_lon = postcode_to_latlon(postcode)
-            except Exception:
-                continue
-
-            dist = haversine_km(lat, lon, org_lat, org_lon)
-            if dist > radius_km:
-                continue
-
-            # Fetch provider detail for registered manager (cached per provider)
-            provider_id = loc.get("providerId", "")
+            provider_id = detail.get("providerId", "")
             contacts = []
             if provider_id:
                 if provider_id not in provider_cache:
@@ -179,27 +181,63 @@ class CQCSource(DataSource):
             if not contacts:
                 contacts = list(_ROLE_PLACEHOLDERS.get(org_type, []))
 
-            addr = loc.get("address") or {}
-            if not isinstance(addr, dict):
-                addr = {}
-
             results.append({
-                "name": loc.get("name", ""),
+                "name": detail.get("name", loc.get("locationName", "")),
                 "org_type": org_type,
                 "source": "cqc",
-                "source_id": f"cqc::{loc.get('locationId', '')}",
-                "address_line1": addr.get("addressLine1", ""),
-                "address_line2": addr.get("addressLine2", ""),
-                "town": addr.get("townOrCity", ""),
-                "postcode": postcode,
+                "source_id": f"cqc::{loc['locationId']}",
+                "address_line1": detail.get("postalAddressLine1", ""),
+                "address_line2": detail.get("postalAddressLine2", ""),
+                "town": detail.get("postalAddressTownCity", ""),
+                "postcode": loc.get("postalCode", ""),
                 "lat": org_lat,
                 "lon": org_lon,
                 "distance_km": round(dist, 2),
-                "phone": loc.get("phone", ""),
+                "phone": detail.get("mainPhoneNumber", ""),
                 "email": "",
-                "website": loc.get("website", ""),
+                "website": detail.get("website", ""),
                 "contacts": contacts,
             })
 
-        print(f"[cqc] Found {len(results)} providers within {radius_km} km")
+        print(f"[cqc] Found {len(results)} registered providers within {radius_km} km")
         return results
+
+    def _list_all_locations(self, la: str) -> list[dict]:
+        """Paginate through all non-care-home locations in a local authority."""
+        all_locs = []
+        page = 1
+        while True:
+            try:
+                r = requests.get(
+                    f"{_CQC_BASE}/locations",
+                    params={"localAuthority": la, "careHome": "N",
+                            "perPage": 1000, "page": page},
+                    headers={"Ocp-Apim-Subscription-Key": self.api_key},
+                    timeout=30,
+                )
+                if r.status_code != 200:
+                    print(f"[cqc] HTTP {r.status_code} on page {page}")
+                    break
+                data = r.json()
+                all_locs.extend(data.get("locations", []))
+                if page >= data.get("totalPages", 1):
+                    break
+                page += 1
+            except Exception as e:
+                print(f"[cqc] API error on page {page}: {e}")
+                break
+        return all_locs
+
+    def _fetch_location(self, location_id: str) -> dict:
+        """Fetch full detail for a single location."""
+        try:
+            r = requests.get(
+                f"{_CQC_BASE}/locations/{location_id}",
+                headers={"Ocp-Apim-Subscription-Key": self.api_key},
+                timeout=15,
+            )
+            if r.status_code == 200:
+                return r.json()
+        except Exception:
+            pass
+        return {}

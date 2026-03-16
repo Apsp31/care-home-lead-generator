@@ -50,6 +50,42 @@ def postcode_to_latlon(postcode: str) -> tuple[float, float]:
     return data["latitude"], data["longitude"]
 
 
+def bulk_geocode_postcodes(postcodes: list[str]) -> dict[str, tuple[float, float]]:
+    """Batch geocode postcodes via postcodes.io (100 per request).
+    Falls back to /terminated_postcodes for old/NHS postcodes.
+    Returns {normalised_postcode: (lat, lon)}."""
+    result: dict[str, tuple[float, float]] = {}
+    for i in range(0, len(postcodes), 100):
+        batch = postcodes[i:i + 100]
+        try:
+            resp = requests.post("https://api.postcodes.io/postcodes",
+                                 json={"postcodes": batch}, timeout=15)
+            if resp.status_code != 200:
+                continue
+            for item in resp.json().get("result", []):
+                if not item:
+                    continue
+                key = item["query"].replace(" ", "").upper()
+                r = item.get("result")
+                if r and r.get("latitude") is not None and r.get("longitude") is not None:
+                    result[key] = (float(r["latitude"]), float(r["longitude"]))
+                else:
+                    try:
+                        tr = requests.get(
+                            f"https://api.postcodes.io/terminated_postcodes/{key}",
+                            timeout=5
+                        )
+                        if tr.status_code == 200:
+                            td = tr.json().get("result", {})
+                            if td.get("latitude") is not None:
+                                result[key] = (float(td["latitude"]), float(td["longitude"]))
+                    except Exception:
+                        pass
+        except Exception:
+            continue
+    return result
+
+
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Great-circle distance in km between two points."""
     from math import radians, sin, cos, sqrt, atan2

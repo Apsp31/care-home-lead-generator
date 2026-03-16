@@ -1,7 +1,7 @@
 """NHS ODS ORD API — GP practices, NHS trusts, PCNs."""
 import requests
 from .base import DataSource
-from .geocoder import haversine_km
+from .geocoder import haversine_km, bulk_geocode_postcodes
 
 # ODS role codes
 ROLE_CODES = {
@@ -37,41 +37,7 @@ def _nearby_outcodes(lat: float, lon: float, radius_km: float) -> list[str]:
         return []
 
 
-def _bulk_geocode(postcodes: list[str]) -> dict[str, tuple[float, float]]:
-    """Batch geocode up to 100 postcodes at a time via postcodes.io.
-    Falls back to /terminated_postcodes for postcodes not found in bulk lookup.
-    Returns {normalised_postcode: (lat, lon)}."""
-    result: dict[str, tuple[float, float]] = {}
-    for i in range(0, len(postcodes), 100):
-        batch = postcodes[i:i + 100]
-        try:
-            resp = requests.post(f"{_POSTCODES_IO}/postcodes",
-                                 json={"postcodes": batch}, timeout=15)
-            if resp.status_code != 200:
-                continue
-            for item in resp.json().get("result", []):
-                if not item:
-                    continue
-                key = item["query"].replace(" ", "").upper()
-                r = item.get("result")
-                if r and r.get("latitude") is not None and r.get("longitude") is not None:
-                    result[key] = (float(r["latitude"]), float(r["longitude"]))
-                else:
-                    # NHS facilities often use terminated postcodes
-                    try:
-                        tr = requests.get(
-                            f"https://api.postcodes.io/terminated_postcodes/{key}",
-                            timeout=5
-                        )
-                        if tr.status_code == 200:
-                            td = tr.json().get("result", {})
-                            if td.get("latitude") is not None:
-                                result[key] = (float(td["latitude"]), float(td["longitude"]))
-                    except Exception:
-                        pass
-        except Exception:
-            continue
-    return result
+_bulk_geocode = bulk_geocode_postcodes  # local alias
 
 
 class NHSODSSource(DataSource):
