@@ -5,6 +5,14 @@ Versions are auto-incremented on each commit (major.minor).
 
 ---
 
+## v1.29 — 2026-03-16
+
+### Fixed
+- Sidebar API key captions (Companies House, Google Places, CQC) now only shown when the key is absent
+- CQC source now distinguishes a missing key (registration prompt) from a rejected/invalid key (HTTP 401/403 → "check key is correct and subscription is active")
+
+---
+
 ## v1.28 — 2026-03-16
 
 ### Fixed
