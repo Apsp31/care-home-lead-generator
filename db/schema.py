@@ -92,14 +92,14 @@ class _Conn:
                 and "ON CONFLICT" not in adapted.upper()
             )
             if wants_returning:
-                adapted = adapted.rstrip().rstrip(";") + " RETURNING id"
+                adapted = adapted.rstrip().rstrip(";") + " RETURNING *"
             cur = self._raw.cursor(cursor_factory=self._cf)
             cur.execute(adapted, params)
             c = _Cursor(cur, "pg")
             if wants_returning:
                 row = cur.fetchone()
-                if row:
-                    c.lastrowid = row.get("id") if isinstance(row, dict) else row[0]
+                if row and isinstance(row, dict) and "id" in row:
+                    c.lastrowid = row["id"]
             return c
         else:
             raw = self._raw.execute(sql, params if params is not None else ())
