@@ -5,12 +5,15 @@ Versions are auto-incremented on each commit (major.minor).
 
 ---
 
-## v1.33 — 2026-05-04
+## v1.34 — 2026-05-04
 
 ### Added
 - New **Retirement Villages** data source (`sources/retirement_villages.py`) — searches for UK retirement villages near the target location using DuckDuckGo, targeting 13 major operators (McCarthy & Stone, Churchill, Inspired Villages, Audley, Richmond, Rangeford, Birchgrove, ExtraCare, Pegasus Life, Housing 21, Anchor, Retirement Villages Group, Homewise) plus generic local queries
 - New `retirement_village` org type with base score 0.65 and wealth indicator 0.80 (residents are owner-occupiers who funded village entry; high self-funder rate when transitioning to residential care)
 - "Retirement Villages (UK operators)" source option in New Search; "Retirement villages" category in org type picker
+
+### Fixed
+- Retirement villages source: tightened noise filtering — added 30+ noise domains (Glassdoor, Cylex, LinkedIn Jobs, OpenRent, Autumna, etc.), rejected non-UK TLDs (.com.au, .hk), added "retirement" qualifier to all provider-specific queries, tightened village keyword matching to title/URL rather than body text, provider-domain matching for borderline results
 
 ---
 

@@ -49,15 +49,35 @@ _PROVIDERS = [
 
 # Domains that are directories / news / info sites — not the village itself
 _NOISE_DOMAINS = {
-    "rightmove.co.uk", "zoopla.co.uk", "onthemarket.com",
-    "carehome.co.uk", "carehomeselect.com", "lottie.org",
-    "retirementvillages.net",  # directory
+    # Property portals
+    "rightmove.co.uk", "zoopla.co.uk", "onthemarket.com", "openrent.co.uk",
+    "whathouse.com", "primelocation.com", "homesandproperty.co.uk",
+    # Care directories
+    "carehome.co.uk", "carehomeselect.com", "lottie.org", "autumna.co.uk",
+    "carehomeadvisor.co.uk", "carehomes.co.uk",
+    # General directories / business listings
+    "cylex-uk.co.uk", "yell.com", "yelp.co.uk", "freeindex.co.uk",
+    "allfurniturestores.co.uk", "directory.birminghampost.co.uk",
+    "top10place.com", "minube.net", "harpers-directory.com",
+    "checkatrade.com", "rated.people.com",
+    # Retirement info / broker sites (not operators)
+    "retirementvillages.net", "retirementmoves.co.uk", "laterlivingnow.co.uk",
+    "housingcare.org", "retirementhomesnyc.com",  # US/Canadian site
+    "retirementconcepts.com",  # Canadian operator
+    # Jobs / recruitment
+    "glassdoor.co.uk", "glassdoor.com", "indeed.co.uk", "reed.co.uk",
+    "linkedin.com", "talents.studysmarter.co.uk",
+    # Social / video
+    "facebook.com", "twitter.com", "instagram.com", "dailymotion.com",
+    "youtube.com",
+    # Consumer advice / finance
     "which.co.uk", "thisismoney.co.uk", "moneysavingexpert.com",
-    "ageuk.org.uk", "citizensadvice.org.uk",
-    "retirementmoves.co.uk",  # property broker
-    "laterlivingnow.co.uk",   # directory
-    "housingcare.org",
+    "moneyhelper.org.uk",
+    # Charity / statutory (not operators)
+    "ageuk.org.uk", "citizensadvice.org.uk", "alzheimers.org.uk",
+    # News
     "theguardian.com", "bbc.co.uk", "telegraph.co.uk", "independent.co.uk",
+    "dailymail.co.uk", "thetimes.co.uk",
 }
 
 # Keywords that confirm a result is a retirement village (not a care home)
@@ -142,7 +162,7 @@ class RetirementVillagesSource(DataSource):
 
         # ── 2. Provider-specific searches ─────────────────────────────────────
         for provider in _PROVIDERS:
-            query = f'"{provider}" "{town}"'
+            query = f'"{provider}" "{town}" retirement'
             time.sleep(_DELAY)
             for org in self._search_villages(query, lat, lon, radius_km, town, provider):
                 _add(org)
@@ -171,12 +191,24 @@ class RetirementVillagesSource(DataSource):
                    for nd in (_NEWS_DOMAINS | _NOISE_DOMAINS)):
                 continue
 
-            combined = (title + " " + body + " " + href).lower()
+            # Reject non-UK domains (Canadian, Australian, US, Hong Kong, etc.)
+            _tld = domain.rsplit(".", 1)[-1] if "." in domain else ""
+            if _tld not in {"uk", "org", "com", "net", "co"} or any(
+                domain.endswith(sfx) for sfx in (".com.au", ".hk", ".ca", ".us", ".ie")
+            ):
+                continue
 
-            # Must match a village keyword; skip pure care homes
-            if not _is_village(combined):
-                # Accept if provider name is in the URL/title even without keyword
-                if not provider or provider.split()[0].lower() not in combined:
+            combined = (title + " " + body + " " + href).lower()
+            title_url = (title + " " + href).lower()
+
+            # Must match a village keyword in title/URL; or provider URL keyword present
+            if not _is_village(title_url):
+                # For provider searches: accept only if provider's own domain is in the URL
+                if not provider:
+                    continue
+                provider_slug = provider.lower().replace(" ", "").replace("&", "").replace("-", "")
+                domain_slug = domain.lower().replace("-", "").replace(".", "")
+                if provider_slug[:8] not in domain_slug:
                     continue
 
             # Geocode from postcode in snippet
