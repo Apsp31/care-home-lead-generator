@@ -70,7 +70,11 @@ Opens at `http://localhost:8501`.
 | NHS ODS ORD API | GP surgeries, NHS trusts, Primary Care Networks | No |
 | OpenStreetMap (Overpass) | Hospices, pharmacies, community centres, social services, places of worship | No |
 | Companies House Public Data API | Solicitors, estate agents, IFAs, wealth managers — with named directors | API key (free) |
-| Web / Social (DuckDuckGo) | Dementia cafes, memory cafes, Age UK branches, carers groups, day centres — plus named contacts from LinkedIn | No |
+| CQC API | Domiciliary / homecare agencies with registered manager names | API key (free) |
+| Web / Social (DuckDuckGo) | Dementia cafes, Age UK branches, carers groups, day centres, senior clubs — plus named contacts from LinkedIn | No |
+| SOLLA | SOLLA-accredited care fees IFA specialists in the area | No |
+| Google Places | Solicitors, IFAs, estate agents, pharmacies via Google Places | API key (paid, $200/mo free credit) |
+| Retirement Villages | UK retirement villages — McCarthy & Stone, Churchill, Inspired Villages, Audley, Richmond, Rangeford, Birchgrove, ExtraCare, Pegasus Life, Housing 21, Anchor and more | No |
 
 The web/social source searches LinkedIn for named professionals in the area (practice managers, discharge liaison nurses, private client solicitors, dementia coordinators etc.) and groups them by employer.
 
@@ -143,27 +147,58 @@ Shows current effective weight per organisation type alongside contacted/convert
 
 ---
 
+## Deployment (Streamlit Cloud + Neon)
+
+### Persistent database with Neon
+
+By default the app uses a local SQLite file (`leads.db`). On Streamlit Cloud the filesystem resets on every redeploy, so use [Neon](https://neon.tech) for a free persistent PostgreSQL database.
+
+1. Sign up at **neon.tech** (free, no credit card required)
+2. Create a new project — pick the region closest to your users
+3. On the project dashboard go to **Connection Details**, select **Connection string**, and copy the `postgresql://...` URI
+4. In Streamlit Cloud open your app → **Settings → Secrets** and add:
+
+```toml
+DATABASE_URL = "postgresql://user:password@host/dbname?sslmode=require"
+```
+
+5. Redeploy — the app creates all tables automatically on first boot
+
+The app detects `DATABASE_URL` at startup. If it is set, PostgreSQL is used; if it is absent, SQLite is used (local dev). No code changes are needed when switching between the two.
+
+Neon's free tier (512 MB, 1 project) never deletes data. Compute auto-suspends after 5 minutes of idle and wakes on the next request (~500 ms cold start).
+
+---
+
 ## Project structure
 
 ```
-app.py                  Streamlit UI — all 4 pages
+app.py                       Streamlit UI — all pages
+auth/
+  auth.py                    User registration, login, session tokens
 db/
-  schema.py             SQLite init, connection factory, WAL mode
-  queries.py            All SQL read/write helpers
+  schema.py                  Connection factory (SQLite + PostgreSQL), schema init
+  queries.py                 All SQL read/write helpers
 sources/
-  base.py               DataSource abstract base class
-  geocoder.py           postcodes.io geocoding + haversine distance
-  nhs_ods.py            NHS ODS ORD API — GPs, hospitals, PCNs
-  overpass.py           OpenStreetMap Overpass — hospices, pharmacies, community
-  companies_house.py    Companies House API — solicitors, IFAs, estate agents
-  web_search.py         DuckDuckGo — dementia cafes, LinkedIn/Facebook contacts
+  base.py                    DataSource abstract base class
+  geocoder.py                postcodes.io geocoding + haversine distance
+  nhs_ods.py                 NHS ODS ORD API — GPs, hospitals, PCNs
+  overpass.py                OpenStreetMap Overpass — hospices, pharmacies, community
+  companies_house.py         Companies House API — solicitors, IFAs, estate agents
+  cqc.py                     CQC API — domiciliary care agencies
+  web_search.py              DuckDuckGo — dementia cafes, LinkedIn contacts
+  solla.py                   SOLLA care fees IFA specialists
+  google_places.py           Google Places API — local businesses
+  retirement_villages.py     UK retirement village operators (DDG-based)
+  enrichment.py              Website contact scraper, LinkedIn enrichment
+  hospital_enrichment.py     NHS Jobs + trust website enrichment for hospitals
 scoring/
-  rules.py              Static base scores, wealth indicators, qualification notes
-  engine.py             Score calculation and feedback-blended weight adjustment
+  rules.py                   Static base scores, wealth indicators, qualification notes
+  engine.py                  Score calculation and feedback-blended weight adjustment
 reports/
-  html_report.py        Jinja2 HTML report generator
+  html_report.py             Jinja2 HTML report generator
   templates/
-    report.html         Report template
+    report.html              Report template
 requirements.txt
 .env.example
 ```
@@ -172,7 +207,8 @@ requirements.txt
 
 ## Notes
 
-- The database (`leads.db`) is created automatically on first run in the project directory
+- The database (`leads.db`) is created automatically on first run in the project directory; use Neon for persistent storage on Streamlit Cloud (see Deployment section above)
 - The web/social source (DuckDuckGo) is rate-limited — space searches by at least 30 seconds if running multiple searches in quick succession
 - Companies House search is national (no location filter on their API) — organisations are filtered by postcode geocoding after retrieval
-- Hospital departments are expanded from a single hospital entry into 7 separate department leads (private patient unit, discharge, frailty, dementia, orthopaedics, stroke, social work)
+- Hospital departments are expanded from a single hospital entry into up to 9 separate department leads (private patient unit, discharge, CHC, frailty, dementia, orthopaedics, stroke, social work, OT discharge)
+- CQC source can be slow on large counties (~75 s for Hertfordshire at 5 km radius)
