@@ -114,12 +114,13 @@ def upsert_organisation(org: dict) -> int:
     with DB_LOCK:
         conn = get_connection()
         conn.execute("""
-            INSERT OR IGNORE INTO organisations
+            INSERT INTO organisations
                 (name, org_type, source, source_id, address_line1, address_line2,
                  town, postcode, lat, lon, distance_km, phone, email, website)
             VALUES (:name, :org_type, :source, :source_id, :address_line1,
                     :address_line2, :town, :postcode, :lat, :lon, :distance_km,
                     :phone, :email, :website)
+            ON CONFLICT(source, source_id) DO NOTHING
         """, {
             "name": org.get("name", ""),
             "org_type": org.get("org_type", ""),

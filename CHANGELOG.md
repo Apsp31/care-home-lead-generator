@@ -5,6 +5,19 @@ Versions are auto-incremented on each commit (major.minor).
 
 ---
 
+## v1.35 — 2026-05-04
+
+### Added
+- Persistent database support via PostgreSQL: set `DATABASE_URL` env var / Streamlit secret to point at a Supabase (or any Postgres) database and all data — users, searches, leads — persists across Streamlit Cloud restarts
+- `db/schema.py` now contains a `_Conn` wrapper that normalises SQLite vs PostgreSQL differences (`?`→`%s`, `:name`→`%(name)s`, `AUTOINCREMENT`→`SERIAL`, `datetime('now')`→`NOW()`, `lastrowid` via `RETURNING id`, `executescript` splitting); no changes needed in the rest of the codebase
+- `psycopg2-binary` added to requirements
+
+### Fixed
+- `INSERT OR IGNORE` in `upsert_organisation` replaced with explicit `ON CONFLICT(source, source_id) DO NOTHING` (works in both SQLite 3.24+ and PostgreSQL)
+- `auth.py` register check used fragile `fetchone()[0]`; now uses named column `cnt`
+
+---
+
 ## v1.34 — 2026-05-04
 
 ### Added

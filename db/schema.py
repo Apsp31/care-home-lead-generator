@@ -1,19 +1,136 @@
-"""Database schema and connection management."""
+"""Database schema and connection management.
+
+Supports SQLite (local dev) and PostgreSQL (production / Streamlit Cloud).
+Set DATABASE_URL env var / Streamlit secret to switch to PostgreSQL.
+"""
+import os
+import re
 import sqlite3
 import threading
 from pathlib import Path
 
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 DB_PATH = Path(__file__).parent.parent / "leads.db"
 
 _lock = threading.Lock()
+DB_LOCK = _lock
 
 
-def get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    return conn
+def _is_pg() -> bool:
+    return bool(DATABASE_URL)
+
+
+def _adapt_sql(sql: str) -> str:
+    """Convert SQLite-dialect SQL to PostgreSQL-compatible SQL."""
+    # DDL
+    sql = sql.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
+    sql = re.sub(r"DEFAULT \(datetime\('now'\)\)", "DEFAULT NOW()", sql, flags=re.I)
+    sql = re.sub(r"ADD COLUMN (?!IF NOT EXISTS)(\w+)", r"ADD COLUMN IF NOT EXISTS \1", sql)
+    # DML
+    sql = re.sub(r"\bdatetime\('now'\)", "NOW()", sql, flags=re.I)
+    # Placeholders: ? → %s  and  :name → %(name)s
+    sql = re.sub(r"\?", "%s", sql)
+    sql = re.sub(r":(\w+)", r"%(\1)s", sql)
+    return sql
+
+
+class _Row(dict):
+    """Dict that also supports integer-index access for sqlite3.Row compatibility."""
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return list(self.values())[key]
+        return super().__getitem__(key)
+
+
+class _Cursor:
+    def __init__(self, raw, backend: str):
+        self._raw = raw
+        self._backend = backend
+        self.lastrowid: int | None = None
+
+    def fetchone(self):
+        row = self._raw.fetchone()
+        if row is None:
+            return None
+        return _Row(dict(row)) if self._backend == "pg" else row
+
+    def fetchall(self):
+        rows = self._raw.fetchall()
+        if self._backend == "pg":
+            return [_Row(dict(r)) for r in rows]
+        return rows
+
+
+class _Conn:
+    """Thin connection wrapper that normalises SQLite and PostgreSQL behaviour."""
+
+    def __init__(self):
+        self._backend = "pg" if _is_pg() else "sqlite"
+        if self._backend == "pg":
+            import psycopg2
+            import psycopg2.extras
+            url = DATABASE_URL
+            if url.startswith("postgres://"):
+                url = url.replace("postgres://", "postgresql://", 1)
+            self._raw = psycopg2.connect(url)
+            self._cf = psycopg2.extras.RealDictCursor
+        else:
+            self._raw = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+            self._raw.row_factory = sqlite3.Row
+            self._raw.execute("PRAGMA journal_mode=WAL")
+            self._raw.execute("PRAGMA foreign_keys=ON")
+            self._cf = None
+
+    def execute(self, sql: str, params=None):
+        if self._backend == "pg":
+            adapted = _adapt_sql(sql)
+            # Auto-append RETURNING id to plain INSERTs so lastrowid is available
+            is_insert = adapted.strip().upper().startswith("INSERT")
+            wants_returning = (
+                is_insert
+                and "RETURNING" not in adapted.upper()
+                and "ON CONFLICT" not in adapted.upper()
+            )
+            if wants_returning:
+                adapted = adapted.rstrip().rstrip(";") + " RETURNING id"
+            cur = self._raw.cursor(cursor_factory=self._cf)
+            cur.execute(adapted, params)
+            c = _Cursor(cur, "pg")
+            if wants_returning:
+                row = cur.fetchone()
+                if row:
+                    c.lastrowid = row.get("id") if isinstance(row, dict) else row[0]
+            return c
+        else:
+            raw = self._raw.execute(sql, params if params is not None else ())
+            c = _Cursor(raw, "sqlite")
+            c.lastrowid = raw.lastrowid
+            return c
+
+    def executescript(self, script: str):
+        if self._backend == "pg":
+            for stmt in script.split(";"):
+                stmt = stmt.strip()
+                if not stmt or stmt.upper().startswith("PRAGMA"):
+                    continue
+                adapted = _adapt_sql(stmt)
+                try:
+                    self._raw.cursor().execute(adapted)
+                except Exception:
+                    self._raw.rollback()
+            self._raw.commit()
+        else:
+            self._raw.executescript(script)
+
+    def commit(self):
+        self._raw.commit()
+
+    def close(self):
+        self._raw.close()
+
+
+def get_connection() -> _Conn:
+    return _Conn()
 
 
 def init_db():
@@ -43,6 +160,8 @@ def init_db():
                 lat             REAL,
                 lon             REAL,
                 sources         TEXT,
+                org_types       TEXT,
+                hospital_depts  TEXT,
                 user_id         INTEGER REFERENCES users(id),
                 run_at          TEXT DEFAULT (datetime('now'))
             );
@@ -61,6 +180,7 @@ def init_db():
                 lon             REAL,
                 distance_km     REAL,
                 phone           TEXT,
+                email           TEXT,
                 website         TEXT,
                 created_at      TEXT DEFAULT (datetime('now')),
                 UNIQUE(source, source_id)
@@ -99,8 +219,8 @@ def init_db():
                 updated_at      TEXT DEFAULT (datetime('now'))
             );
         """)
-        conn.commit()
-        # Migrations
+
+        # Migrations — idempotent on both backends
         for ddl in [
             "ALTER TABLE search_runs ADD COLUMN sources TEXT",
             "ALTER TABLE search_runs ADD COLUMN org_types TEXT",
@@ -114,9 +234,7 @@ def init_db():
             except Exception:
                 pass
 
-        # One-time cleanup: remove duplicate leads within the same run caused by
-        # the same physical location appearing as both a node and way in OSM.
-        # Keep the lead with the lower id (first inserted); delete its duplicates.
+        # One-time dedup cleanup (SQLite only — PG won't have legacy dups)
         try:
             conn.execute("""
                 DELETE FROM leads
@@ -138,7 +256,5 @@ def init_db():
             conn.commit()
         except Exception:
             pass
+
         conn.close()
-
-
-DB_LOCK = _lock

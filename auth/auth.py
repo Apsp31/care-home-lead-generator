@@ -24,7 +24,7 @@ def register_user(username: str, password: str) -> tuple[bool, str]:
     try:
         with DB_LOCK:
             conn = get_connection()
-            count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+            count = conn.execute("SELECT COUNT(*) AS cnt FROM users").fetchone()["cnt"]
             is_admin = 1 if count == 0 else 0
             conn.execute(
                 "INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, ?)",
