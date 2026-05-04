@@ -23,6 +23,7 @@ from sources.companies_house import CompaniesHouseSource
 from sources.web_search import WebSearchSource
 from sources.solla import SollaSource
 from sources.cqc import CQCSource
+from sources.retirement_villages import RetirementVillagesSource
 from sources.google_places import GooglePlacesSource
 from sources.enrichment import enrich_contacts, enrich_website_contacts, ENRICH_ROLES
 from sources.hospital_enrichment import enrich_hospital_orgs
@@ -245,6 +246,8 @@ def run_sources(lat, lon, radius_km, selected_sources, hospital_dept_types=None)
         sources.append(CQCSource())
     if "Google Places (local businesses — requires API key)" in selected_sources:
         sources.append(GooglePlacesSource())
+    if "Retirement Villages (UK operators)" in selected_sources:
+        sources.append(RetirementVillagesSource())
 
     all_orgs = []
     errors = []
@@ -528,6 +531,7 @@ ALL_SOURCES = [
     "Web / Social (dementia cafes, LinkedIn, Facebook)",
     "SOLLA (care fees IFA specialists)",
     "Google Places (local businesses — requires API key)",
+    "Retirement Villages (UK operators)",
 ]
 DEFAULT_SOURCES = [
     "NHS (GPs, hospitals, PCNs)",
@@ -564,6 +568,7 @@ ORG_CATEGORY_OPTIONS: dict[str, list[str]] = {
     "Libraries":                 ["library"],
     "Post offices":              ["post_office"],
     "Senior clubs (U3A, WI, Rotary)": ["senior_club"],
+    "Retirement villages":            ["retirement_village"],
 }
 ALL_ORG_CATEGORIES = list(ORG_CATEGORY_OPTIONS.keys())
 

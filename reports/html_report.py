@@ -47,6 +47,8 @@ ORG_TYPE_LABELS = {
     "library":              "Libraries",
     "post_office":          "Post Offices",
     "senior_club":          "Senior Clubs (U3A, WI, Rotary, Probus, Bowls)",
+    # Retirement living
+    "retirement_village":   "Retirement Villages & Retirement Living",
 }
 
 # Display order — highest wealth indicator / referral priority first

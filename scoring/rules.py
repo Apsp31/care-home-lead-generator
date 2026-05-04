@@ -41,6 +41,8 @@ ORG_TYPE_BASE_SCORES: dict[str, float] = {
     "library":              0.45,
     "post_office":          0.40,
     "senior_club":          0.55,  # U3A / WI / Rotary — active older adults approaching care planning age
+    # Retirement villages
+    "retirement_village":   0.65,  # residents transition to residential care when needs exceed village provision
 }
 
 # Wealth indicator: likelihood that this org's clients can self-fund ~£2k/week
@@ -75,6 +77,7 @@ WEALTH_INDICATOR_SCORES: dict[str, float] = {
     "library":              0.35,
     "post_office":          0.30,
     "senior_club":          0.50,  # WI/U3A/Rotary — middle-class retired demographic
+    "retirement_village":   0.80,  # owner-occupiers who sold homes to fund village entry; high self-funder rate
 }
 
 # Displayed in the report and dashboard to explain relevance
@@ -178,6 +181,12 @@ QUALIFICATION_NOTES: dict[str, str] = {
         "members are at or approaching care planning age. Chair and secretary circulate newsletters and "
         "notices to the whole membership. A talk at a meeting or flyer in a newsletter reaches a highly "
         "targeted audience of asset-owning older adults.",
+    "retirement_village":
+        "Retirement Village — residents are typically owner-occupiers who sold their homes to fund village "
+        "entry and live independently until care needs increase. When needs exceed what the village provides "
+        "(personal care, nursing, dementia), the village manager or care coordinator refers residents to "
+        "residential care homes. High self-funder likelihood: residents have already demonstrated the "
+        "financial means and willingness to fund specialist later-life accommodation.",
 }
 
 # Component weights — must sum to 1.0
